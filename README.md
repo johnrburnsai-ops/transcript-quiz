@@ -9,9 +9,9 @@ OpenAI's ChatGPT/Codex OAuth credentials are not supported credentials for `gpt-
 To preserve the **no API keys** requirement, this application uses the supported `codex app-server` integration instead:
 
 - `codex app-server` starts the OpenAI device-code browser login.
-- Codex owns token refresh and stores credentials in the operating-system keyring.
+- Codex owns token refresh and stores this app's credentials in its isolated file-backed profile.
 - This application never reads, copies, logs, or stores OAuth access or refresh tokens.
-- Quiz generation prefers the application default `gpt-5.5` when it is present in the live visible Codex catalog, then falls back to the account default. It does not silently fall back to an API key or claim to use `gpt-4o-mini`.
+- Quiz generation prefers the application default `gpt-5.4-mini` when it is present in the live visible Codex catalog, then falls back to the account default. It does not silently fall back to an API key or claim to use `gpt-4o-mini`.
 
 The OpenAI Python SDK cannot turn a ChatGPT/Codex OAuth token into a supported Platform API session, so it is intentionally not used. Direct token handling and inference are delegated to Codex's supported app-server boundary.
 
@@ -68,7 +68,7 @@ launchers are required. Double-click `LaunchTranscriptQuiz.vbs` in that folder
 on the destination machine. The frozen EXE still needs Codex CLI `0.144.5`
 installed and discoverable on `PATH`, or configured with `CODEX_CLI_PATH`. The
 PyInstaller spec includes CustomTkinter's themes and images, but does not
-bundle Codex, OAuth credentials, or the Codex profile/keyring.
+bundle Codex, OAuth credentials, or the Codex profile.
 
 On first launch:
 
@@ -78,9 +78,9 @@ On first launch:
 4. Enter the one-time code displayed by the app.
 5. Return to the app after authorization completes.
 
-The isolated application profile does not import credentials from your normal `~/.codex` profile. Sign in once inside this app; Codex then keeps that app-specific OAuth session in the OS keyring across launches.
+The isolated application profile does not import credentials from your normal `~/.codex` profile. Sign in once inside this app; Codex then keeps that app-specific OAuth session in the app profile's `auth.json` across launches. Treat that file as sensitive.
 
-Use **Sign out** only when you intend to sign the local Codex CLI out. Closing the application does not revoke or remove the Codex session.
+**Sign out** removes only this app's local Codex credentials; it does not send a server-side logout to OpenCode or standalone Codex CLI. Closing the application does not revoke or remove the local session.
 
 ## Using the app
 
@@ -94,7 +94,7 @@ Saved transcripts are grouped by date and searchable. Each transcript can have m
 
 Quiz generation uses the transcript's prior quizzes as context. It aims to cover the transcript's topic clusters, mix recall with application and troubleshooting questions, use original CompTIA A+-style practice wording when appropriate, and keep at least half of a later quiz's question stems novel. It does not reproduce official exam questions.
 
-After sign-in, the **Available models** selector is populated from the account's live Codex catalog. `gpt-5.5` is the preferred application default when available; otherwise the account default is selected. You can choose any other visible model, including the account default, for the current session. Models are account- and service-dependent; if an explicitly selected model disappears, generation falls back safely. The selector does not promise a particular cost or usage rate.
+After sign-in, the **Available models** selector is populated from the account's live Codex catalog. `gpt-5.4-mini` is the preferred application default when available; otherwise the account default is selected. You can choose any other visible model, including the account default, for the current session. Models are account- and service-dependent; if an explicitly selected model disappears, generation falls back safely. The selector does not promise a particular cost or usage rate.
 
 Keyboard shortcuts:
 
@@ -115,7 +115,7 @@ Deleting a transcript also deletes its quizzes and attempts. SQLite content is n
 
 Transcript text is sent to the OpenAI Codex service when a quiz is generated. The app starts each generation in a fresh ephemeral, read-only Codex thread with approvals disabled and network access disabled for model-invoked commands.
 
-The app uses a dedicated profile at `%LOCALAPPDATA%\TranscriptQuiz\codex` on Windows (or the platform-equivalent application data directory). It writes a strict configuration that permits only ChatGPT OAuth with the official OpenAI provider, disables shell, web, MCP, plugin, app, skill, hook, and multi-agent features, and prevents inherited environment credentials or proxy/routing overrides. Generation fails closed if Codex reports a different provider or attempts a tool item. The transcript generation limit is 1 MB.
+The app uses a dedicated profile at `%LOCALAPPDATA%\TranscriptQuiz\codex` on Windows (or the platform-equivalent application data directory). It uses file-backed credentials inside that profile so local sign-out cannot remove another tool's credentials. It writes a strict configuration that permits only ChatGPT OAuth with the official OpenAI provider, disables shell, web, MCP, plugin, app, skill, hook, and multi-agent features, and prevents inherited environment credentials or proxy/routing overrides. Generation fails closed if Codex reports a different provider or attempts a tool item. The transcript generation limit is 1 MB.
 
 These controls limit model-visible capabilities; they are not an operating-system sandbox for a compromised Codex executable. Install Codex only from OpenAI's official distribution.
 

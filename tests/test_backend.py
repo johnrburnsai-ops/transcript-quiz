@@ -683,7 +683,16 @@ class AppServerIntegrationTests(unittest.TestCase):
             self.assertEqual(status.email, "learner@example.test")
             self.assertEqual(challenges[0].user_code, "ABCD-EFGH")
             browser.assert_called_once_with("https://example.test/device")
+            auth_file = self.codex_home / "auth.json"
+            mcp_credentials_file = self.codex_home / ".credentials.json"
+            auth_file.write_text("local auth", encoding="utf-8")
+            mcp_credentials_file.write_text("local credentials", encoding="utf-8")
             manager.sign_out()
+            self.assertFalse(auth_file.exists())
+            self.assertFalse(mcp_credentials_file.exists())
+            self.assertFalse(
+                any(message.get("method") == "account/logout" for message in process.messages)
+            )
             self.assertFalse(manager.check_status().signed_in)
             api.close()
 
