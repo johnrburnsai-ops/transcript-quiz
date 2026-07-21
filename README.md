@@ -11,7 +11,7 @@ To preserve the **no API keys** requirement, this application uses the supported
 - `codex app-server` starts the OpenAI device-code browser login.
 - Codex owns token refresh and stores credentials in the operating-system keyring.
 - This application never reads, copies, logs, or stores OAuth access or refresh tokens.
-- Quiz generation uses the default visible Codex model available to the signed-in account. It does not silently fall back to an API key or claim to use `gpt-4o-mini`.
+- Quiz generation prefers the application default `gpt-5.5` when it is present in the live visible Codex catalog, then falls back to the account default. It does not silently fall back to an API key or claim to use `gpt-4o-mini`.
 
 The OpenAI Python SDK cannot turn a ChatGPT/Codex OAuth token into a supported Platform API session, so it is intentionally not used. Direct token handling and inference are delegated to Codex's supported app-server boundary.
 
@@ -94,7 +94,7 @@ Saved transcripts are grouped by date and searchable. Each transcript can have m
 
 Quiz generation uses the transcript's prior quizzes as context. It aims to cover the transcript's topic clusters, mix recall with application and troubleshooting questions, use original CompTIA A+-style practice wording when appropriate, and keep at least half of a later quiz's question stems novel. It does not reproduce official exam questions.
 
-After sign-in, the **Available models** selector is populated from the account's live Codex catalog. The account default is selected initially, but you can choose another visible model for the current session. Models are account- and service-dependent; if a selected model disappears, generation falls back to the current account default. The selector does not promise a particular cost or usage rate.
+After sign-in, the **Available models** selector is populated from the account's live Codex catalog. `gpt-5.5` is the preferred application default when available; otherwise the account default is selected. You can choose any other visible model, including the account default, for the current session. Models are account- and service-dependent; if an explicitly selected model disappears, generation falls back safely. The selector does not promise a particular cost or usage rate.
 
 Keyboard shortcuts:
 

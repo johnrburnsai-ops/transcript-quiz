@@ -7,12 +7,15 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from collections import Counter
 from pathlib import Path
 from unittest import mock
 
 from api_handler import (
+    ApiError,
     ApiHandler,
     QuizValidationError,
+    _DEFAULT_PREFERRED_MODEL,
     _DISABLED_CODEX_FEATURES,
     validate_quiz_output,
 )
@@ -34,6 +37,32 @@ def _quiz_data(count: int = 10) -> list[dict]:
         }
         for index in range(1, count + 1)
     ]
+
+
+def _assert_generated_quiz_preserves_semantics(
+    testcase: unittest.TestCase,
+    generated: list[dict],
+    source: list[dict],
+) -> None:
+    testcase.assertEqual(len(generated), len(source))
+    positions = [question["answer"] for question in generated]
+    counts = Counter(positions)
+    full_rounds, remainder = divmod(len(source), 4)
+    expected_counts = sorted(
+        full_rounds + (1 if index < remainder else 0)
+        for index in range(4)
+    )
+    testcase.assertEqual(sorted(counts.get(letter, 0) for letter in "ABCD"), expected_counts)
+    if len(source) >= 4:
+        testcase.assertTrue(all(counts[letter] > 0 for letter in "ABCD"))
+
+    for actual, original in zip(generated, source):
+        testcase.assertEqual(actual["question"], original["question"])
+        testcase.assertEqual(set(actual["options"].values()), set(original["options"].values()))
+        testcase.assertEqual(
+            actual["options"][actual["answer"]],
+            original["options"][original["answer"]],
+        )
 
 
 class DatabaseTests(unittest.TestCase):
@@ -328,7 +357,15 @@ class _FakeProcess:
         self.cwd_seen: str | None = None
         self.cwd_was_empty = False
         self.emit_duplicate_first_turn = False
+        self.emit_duplicate_all_turns = False
         self.emit_overlap_first_turn = False
+        self.emit_failed_turn = False
+        self.suppress_thread_start = False
+        self.suppress_turn_start = False
+        self.model_catalog = [
+            {"model": "visible-other", "isDefault": False},
+            {"model": "account-default", "isDefault": True},
+        ]
         self.thread_count = 0
         self.turn_count = 0
         self.__class__.instances.append(self)
@@ -363,8 +400,8 @@ class _FakeProcess:
                         "openai_base_url": "https://chatgpt.com/backend-api/codex",
                         "chatgpt_base_url": "https://chatgpt.com/backend-api",
                         "forced_login_method": "chatgpt",
-                        "cli_auth_credentials_store": "keyring",
-                        "mcp_oauth_credentials_store": "keyring",
+                        "cli_auth_credentials_store": "file",
+                        "mcp_oauth_credentials_store": "file",
                         "approval_policy": "never",
                         "sandbox_mode": "read-only",
                         "web_search": "disabled",
@@ -457,18 +494,19 @@ class _FakeProcess:
         elif method == "model/list":
             params = message["params"]
             if params["cursor"] is None:
+                first_page = list(self.model_catalog[:1])
                 self._respond(
                     message,
                     {
-                        "data": [{"model": "visible-other", "isDefault": False}],
-                        "nextCursor": "page-2",
+                        "data": first_page,
+                        "nextCursor": "page-2" if len(self.model_catalog) > 1 else None,
                     },
                 )
             else:
                 self._respond(
                     message,
                     {
-                        "data": [{"model": "account-default", "isDefault": True}],
+                        "data": list(self.model_catalog[1:]),
                         "nextCursor": None,
                     },
                 )
@@ -478,6 +516,8 @@ class _FakeProcess:
             thread_id = f"thread-good-{self.thread_count}"
             self.cwd_seen = cwd
             self.cwd_was_empty = os.path.isdir(cwd) and not os.listdir(cwd)
+            if self.suppress_thread_start:
+                return
             self._respond(
                 message,
                 {
@@ -501,7 +541,26 @@ class _FakeProcess:
             thread_id = message["params"]["threadId"]
             turn_id = f"turn-good-{self.turn_count}"
             question_count = message["params"]["outputSchema"]["properties"]["questions"]["minItems"]
-            if self.emit_duplicate_first_turn and self.turn_count == 1:
+            if self.suppress_turn_start:
+                return
+            if self.emit_failed_turn:
+                self._notify(
+                    "turn/completed",
+                    {
+                        "threadId": thread_id,
+                        "turnId": turn_id,
+                        "turn": {
+                            "id": turn_id,
+                            "status": "failed",
+                            "error": {"message": "synthetic server failure"},
+                        },
+                    },
+                )
+                self._respond(message, {"turn": {"id": turn_id, "status": "inProgress"}})
+                return
+            if self.emit_duplicate_all_turns or (
+                self.emit_duplicate_first_turn and self.turn_count == 1
+            ):
                 duplicate_data = _quiz_data(question_count)
                 duplicate_data[min(4, question_count - 1)]["options"]["B"] = duplicate_data[
                     min(4, question_count - 1)
@@ -641,7 +700,7 @@ class AppServerIntegrationTests(unittest.TestCase):
         _FakeProcess.instances[-1].signed_in = True
         generated = api.generate_quiz(transcript, progress.append)
         self.assertEqual(generated.model, "account-default")
-        self.assertEqual(generated.questions, _quiz_data())
+        _assert_generated_quiz_preserves_semantics(self, generated.questions, _quiz_data())
         self.assertTrue(progress)
 
         process = _FakeProcess.instances[-1]
@@ -680,6 +739,51 @@ class AppServerIntegrationTests(unittest.TestCase):
         )
         api.close()
 
+    def test_application_default_model_is_preferred_when_visible(self) -> None:
+        api = ApiHandler(
+            request_timeout=2,
+            generation_timeout=5,
+            codex_home=self.codex_home,
+        )
+        api.start()
+        process = _FakeProcess.instances[-1]
+        process.signed_in = True
+        process.model_catalog = [
+            {"model": "account-default", "isDefault": True},
+            {"model": _DEFAULT_PREFERRED_MODEL, "isDefault": False},
+            {"model": "visible-other", "isDefault": False},
+        ]
+
+        generated = api.generate_quiz("Prefer the application model when available.")
+
+        self.assertEqual(generated.model, _DEFAULT_PREFERRED_MODEL)
+        thread_request = next(
+            message for message in process.messages if message.get("method") == "thread/start"
+        )
+        self.assertEqual(thread_request["params"]["model"], _DEFAULT_PREFERRED_MODEL)
+        api.close()
+
+    def test_explicit_account_default_model_beats_application_default(self) -> None:
+        api = ApiHandler(
+            request_timeout=2,
+            generation_timeout=5,
+            codex_home=self.codex_home,
+        )
+        api.start()
+        process = _FakeProcess.instances[-1]
+        process.signed_in = True
+        process.model_catalog = [
+            {"model": "account-default", "isDefault": True},
+            {"model": _DEFAULT_PREFERRED_MODEL, "isDefault": False},
+        ]
+        api.set_preferred_model("account-default")
+
+        generated = api.generate_quiz("Honor the explicitly selected account default.")
+
+        self.assertEqual(generated.model, "account-default")
+        self.assertEqual(api.get_preferred_model(), "account-default")
+        api.close()
+
     def test_dynamic_generation_schema_and_prompts(self) -> None:
         api = ApiHandler(
             request_timeout=2,
@@ -690,13 +794,17 @@ class AppServerIntegrationTests(unittest.TestCase):
         process = _FakeProcess.instances[-1]
         process.signed_in = True
 
-        for count in (5, 15):
+        for count in (2, 3, 5, 15):
             with self.subTest(count=count):
                 generated = api.generate_quiz(
                     f"Generate {count} questions from this transcript.",
                     question_count=count,
                 )
-                self.assertEqual(generated.questions, _quiz_data(count))
+                _assert_generated_quiz_preserves_semantics(
+                    self,
+                    generated.questions,
+                    _quiz_data(count),
+                )
                 turn_request = [
                     message for message in process.messages if message.get("method") == "turn/start"
                 ][-1]
@@ -730,7 +838,7 @@ class AppServerIntegrationTests(unittest.TestCase):
             previous_questions=previous_questions,
         )
 
-        self.assertEqual(generated.questions, _quiz_data(5))
+        _assert_generated_quiz_preserves_semantics(self, generated.questions, _quiz_data(5))
         thread_request = [
             message for message in process.messages if message.get("method") == "thread/start"
         ][-1]
@@ -742,6 +850,30 @@ class AppServerIntegrationTests(unittest.TestCase):
             "recall/recognition",
             "application/compare",
             "troubleshooting/next-best-action",
+            "Balance correct-answer positions",
+            "never default to A",
+            "exactly one transcript-supported objective",
+            "exactly one cognitive task",
+            "all relevant conditions",
+            "explicit ranking criterion",
+            "mutually exclusive",
+            "grammatically parallel",
+            "same semantic type",
+            "technical category",
+            "common misconceptions",
+            "legitimate same-domain near neighbors",
+            "changed condition",
+            "valid-but-premature",
+            "wrong-layer",
+            "unsafe",
+            "overly disruptive",
+            "absurd category mismatches",
+            "unrelated facts",
+            "fabricated terms",
+            "cueing by length/detail/grammar",
+            "absolute-word clues",
+            "overlapping options",
+            "multiple defensible answers",
             "original practice content",
             "not an official CompTIA question",
             "exam prediction",
@@ -793,6 +925,14 @@ class AppServerIntegrationTests(unittest.TestCase):
             "topic clusters",
             "application/compare",
             "troubleshooting/next-best-action",
+            "Balance correct-answer positions",
+            "never default to A",
+            "exactly one transcript-supported objective",
+            "exactly one cognitive task",
+            "mutually exclusive",
+            "grammatically parallel",
+            "common misconceptions",
+            "multiple defensible answers",
             "original practice content",
             "materially new",
         ):
@@ -855,7 +995,7 @@ class AppServerIntegrationTests(unittest.TestCase):
 
         generated = api.generate_quiz("A transcript with educational content.", progress.append)
 
-        self.assertEqual(generated.questions, _quiz_data())
+        _assert_generated_quiz_preserves_semantics(self, generated.questions, _quiz_data())
         turn_requests = [message for message in process.messages if message.get("method") == "turn/start"]
         thread_requests = [message for message in process.messages if message.get("method") == "thread/start"]
         self.assertEqual(len(turn_requests), 2)
@@ -870,6 +1010,97 @@ class AppServerIntegrationTests(unittest.TestCase):
         self.assertIn("only correct option", retry_instructions)
         self.assertIn("conform exactly", retry_instructions)
         self.assertEqual(turn_requests[0]["params"]["outputSchema"], turn_requests[1]["params"]["outputSchema"])
+        api.close()
+
+    def test_thread_start_timeout_resets_process_for_next_request(self) -> None:
+        api = ApiHandler(
+            request_timeout=0.05,
+            generation_timeout=2,
+            codex_home=self.codex_home,
+        )
+        api.start()
+        first_process = _FakeProcess.instances[-1]
+        first_process.signed_in = True
+        first_process.suppress_thread_start = True
+
+        with self.assertRaises(ApiError) as raised:
+            api.generate_quiz("A transcript whose thread request will time out.")
+
+        self.assertIn("generation stage: thread start", str(raised.exception))
+        self.assertIsNone(api._process)
+        self.assertIsNotNone(first_process.returncode)
+
+        api.start()
+        second_process = _FakeProcess.instances[-1]
+        self.assertIsNot(second_process, first_process)
+        second_process.signed_in = True
+        generated = api.generate_quiz("A transcript after the timed out thread request.")
+        _assert_generated_quiz_preserves_semantics(self, generated.questions, _quiz_data())
+        api.close()
+
+    def test_turn_start_timeout_resets_process_for_next_request(self) -> None:
+        api = ApiHandler(
+            request_timeout=0.05,
+            generation_timeout=2,
+            codex_home=self.codex_home,
+        )
+        api.start()
+        first_process = _FakeProcess.instances[-1]
+        first_process.signed_in = True
+        first_process.suppress_turn_start = True
+
+        with self.assertRaises(ApiError) as raised:
+            api.generate_quiz("A transcript whose turn request will time out.")
+
+        self.assertIn("generation stage: turn start", str(raised.exception))
+        self.assertIsNone(api._process)
+        self.assertIsNotNone(first_process.returncode)
+
+        api.start()
+        second_process = _FakeProcess.instances[-1]
+        self.assertIsNot(second_process, first_process)
+        second_process.signed_in = True
+        generated = api.generate_quiz("A transcript after the timed out turn request.")
+        _assert_generated_quiz_preserves_semantics(self, generated.questions, _quiz_data())
+        api.close()
+
+    def test_generation_error_context_does_not_stop_process(self) -> None:
+        api = ApiHandler(
+            request_timeout=2,
+            generation_timeout=5,
+            codex_home=self.codex_home,
+        )
+        api.start()
+        process = _FakeProcess.instances[-1]
+        process.signed_in = True
+        process.emit_failed_turn = True
+
+        with self.assertRaises(ApiError) as raised:
+            api.generate_quiz("A transcript whose server turn will fail.")
+
+        self.assertIn("generation stage: waiting for events", str(raised.exception))
+        self.assertIsNone(process.returncode)
+        self.assertIs(api._process, process)
+        api.close()
+
+    def test_validation_error_context_keeps_process_running(self) -> None:
+        api = ApiHandler(
+            request_timeout=2,
+            generation_timeout=5,
+            codex_home=self.codex_home,
+        )
+        api.start()
+        process = _FakeProcess.instances[-1]
+        process.signed_in = True
+        process.emit_duplicate_all_turns = True
+
+        with self.assertRaises(QuizValidationError) as raised:
+            api.generate_quiz("A transcript whose output stays invalid.")
+
+        self.assertIn("generation stage: validating output", str(raised.exception))
+        self.assertIn("option texts must be unique", str(raised.exception))
+        self.assertIsNone(process.returncode)
+        self.assertIs(api._process, process)
         api.close()
 
     def test_poisoned_transport_restarts_on_next_request(self) -> None:

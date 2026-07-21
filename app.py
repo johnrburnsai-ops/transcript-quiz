@@ -18,6 +18,7 @@ from api_handler import (
     CodexNotFoundError,
     GenerationCancelledError,
     QuizValidationError,
+    _DEFAULT_PREFERRED_MODEL,
 )
 from auth_manager import AuthManager, AuthStatus, DeviceChallenge
 from database import AttemptRecord, Database, QuizRecord, TranscriptRecord
@@ -27,23 +28,47 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 
+# A small, deliberate palette keeps the interface calm while giving actions and
+# states a clear visual language.  The old color names are retained because the
+# rest of the app uses them as semantic roles (rather than raw colors).
 COLORS = {
-    "window": "#0B1020",
-    "panel": "#121A2B",
-    "panel_alt": "#172136",
-    "panel_hover": "#202D46",
-    "border": "#293752",
-    "text": "#F4F7FB",
-    "muted": "#92A2BC",
-    "accent": "#6C63FF",
-    "accent_hover": "#7C74FF",
-    "teal": "#2CB9A7",
-    "green": "#2EAE76",
-    "green_dark": "#153C31",
-    "red": "#E2636B",
-    "red_dark": "#46242C",
-    "amber": "#DDAA4A",
+    "window": "#080A0D",       # application background
+    "panel": "#11151A",        # primary surface
+    "panel_alt": "#191E25",    # elevated/input surface
+    "panel_hover": "#252D36",  # hover surface
+    "border": "#2A333D",
+    "border_strong": "#3D4956",
+    "text": "#F4F6F8",
+    "muted": "#9AA5B0",
+    "subtle": "#6F7B87",
+    "accent": "#2D6BFF",       # restrained electric blue
+    "accent_hover": "#3D73E8",
+    "accent_soft": "#142A52",
+    "on_accent": "#FFFFFF",
+    "focus": "#9AB7FF",
+    "teal": "#40C995",         # success
+    "green": "#40C995",        # success
+    "green_dark": "#12392C",   # success surface
+    "success_surface": "#12392C",
+    "success_surface_hover": "#194936",
+    "success_text": "#B6F0D1",
+    "success_border": "#40C995",
+    "red": "#F0717B",          # error
+    "red_dark": "#42232B",     # error surface
+    "danger_text": "#FFD9DE",
+    "amber": "#D8AB55",        # warning
+    "amber_dark": "#3D3018",
+    "warning_text": "#F3D58E",
+    "disabled_text": "#74808C",
 }
+
+FONT_DISPLAY = "Bahnschrift"
+FONT_BODY = "Segoe UI"
+FONT_MONO = "Consolas"
+
+
+def _font(size: int, weight: str = "normal", family: str = FONT_BODY) -> ctk.CTkFont:
+    return ctk.CTkFont(family=family, size=size, weight=weight)
 
 QUESTION_COUNT_CHOICES = (5, 10, 15, 20, 25, 30)
 DEFAULT_QUESTION_COUNT = 10
@@ -100,6 +125,13 @@ def _format_duration(seconds: int) -> str:
     return f"{minutes:d}:{seconds:02d}"
 
 
+def _ellipsize(value: Any, limit: int) -> str:
+    text = " ".join(str(value).split())
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(1, limit - 1)].rstrip()}…"
+
+
 _SECRET_PATTERNS = (
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
@@ -142,8 +174,8 @@ class DeviceLoginDialog(ctk.CTkToplevel):
         self.on_cancel = on_cancel
         self._finished = False
 
-        self.title("Sign in with OpenAI")
-        self.geometry("560x400")
+        self.title("OpenAI sign-in")
+        self.geometry("580x410")
         self.resizable(False, False)
         self.configure(fg_color=COLORS["window"])
         self.transient(master)
@@ -155,37 +187,50 @@ class DeviceLoginDialog(ctk.CTkToplevel):
             fg_color=COLORS["panel"],
             border_width=1,
             border_color=COLORS["border"],
-            corner_radius=18,
+            corner_radius=16,
         )
-        shell.pack(fill="both", expand=True, padx=24, pady=24)
+        shell.pack(fill="both", expand=True, padx=22, pady=22)
+
+        ctk.CTkLabel(
+            shell,
+            text="OPENAI AUTHENTICATION",
+            font=_font(10, "bold"),
+            text_color=COLORS["accent_hover"],
+        ).pack(anchor="w", padx=26, pady=(22, 7))
 
         ctk.CTkLabel(
             shell,
             text="Finish signing in",
-            font=ctk.CTkFont(size=24, weight="bold"),
+            font=_font(24, "bold", FONT_DISPLAY),
             text_color=COLORS["text"],
-        ).pack(anchor="w", padx=26, pady=(24, 6))
+        ).pack(anchor="w", padx=26, pady=(0, 6))
         ctk.CTkLabel(
             shell,
-            text="Your browser should be open. Enter this one-time code on the OpenAI page.",
-            font=ctk.CTkFont(size=13),
+            text="Enter this one-time code on the OpenAI page. Your browser should already be open.",
+            font=_font(13),
             text_color=COLORS["muted"],
             justify="left",
-            wraplength=450,
+            wraplength=470,
         ).pack(anchor="w", padx=26, pady=(0, 20))
 
-        code_frame = ctk.CTkFrame(shell, fg_color=COLORS["panel_alt"], corner_radius=14)
+        code_frame = ctk.CTkFrame(
+            shell,
+            fg_color=COLORS["panel_alt"],
+            border_width=1,
+            border_color=COLORS["accent_soft"],
+            corner_radius=12,
+        )
         code_frame.pack(fill="x", padx=26)
         ctk.CTkLabel(
             code_frame,
             text=challenge.user_code,
-            font=ctk.CTkFont(family="Consolas", size=30, weight="bold"),
-            text_color=COLORS["text"],
+            font=_font(30, "bold", FONT_MONO),
+            text_color=COLORS["accent_hover"],
         ).pack(pady=(18, 6))
         ctk.CTkLabel(
             code_frame,
             text=challenge.verification_url,
-            font=ctk.CTkFont(size=12),
+            font=_font(12),
             text_color=COLORS["muted"],
         ).pack(pady=(0, 18))
 
@@ -198,6 +243,12 @@ class DeviceLoginDialog(ctk.CTkToplevel):
             height=38,
             fg_color=COLORS["panel_alt"],
             hover_color=COLORS["panel_hover"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=9,
+            font=_font(12, "bold"),
+            text_color=COLORS["text"],
+            text_color_disabled=COLORS["disabled_text"],
             command=self.copy_code,
         )
         self.copy_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
@@ -207,6 +258,10 @@ class DeviceLoginDialog(ctk.CTkToplevel):
             height=38,
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_hover"],
+            corner_radius=9,
+            font=_font(12, "bold"),
+            text_color=COLORS["on_accent"],
+            text_color_disabled=COLORS["disabled_text"],
             command=lambda: webbrowser.open(challenge.verification_url),
         ).grid(row=0, column=1, sticky="ew", padx=6)
         self.cancel_button = ctk.CTkButton(
@@ -215,6 +270,10 @@ class DeviceLoginDialog(ctk.CTkToplevel):
             height=38,
             fg_color=COLORS["red_dark"],
             hover_color=COLORS["red"],
+            corner_radius=9,
+            font=_font(12, "bold"),
+            text_color=COLORS["danger_text"],
+            text_color_disabled=COLORS["disabled_text"],
             command=self.cancel,
         )
         self.cancel_button.grid(row=0, column=2, sticky="ew", padx=(6, 0))
@@ -223,9 +282,9 @@ class DeviceLoginDialog(ctk.CTkToplevel):
             shell,
             text="Waiting for authorization…",
             text_color=COLORS["muted"],
-            font=ctk.CTkFont(size=12),
+            font=_font(12),
         )
-        self.wait_label.pack(pady=(4, 0))
+        self.wait_label.pack(pady=(6, 0))
         self.bind("<Escape>", lambda _event: self.cancel())
         self.after(100, self.focus_force)
 
@@ -276,7 +335,7 @@ class ReviewWindow(ctk.CTkToplevel):
         self._closed = False
         self._copy_reset_after: str | None = None
         self.title("Quiz review")
-        self.geometry("960x820")
+        self.geometry("960x800")
         self.minsize(760, 620)
         self.configure(fg_color=COLORS["window"])
         self.transient(master)
@@ -287,23 +346,31 @@ class ReviewWindow(ctk.CTkToplevel):
         percentage = round((score / total) * 100) if total else 0
         elapsed = _elapsed_seconds(attempt.started_at, attempt.completed_at)
 
-        header = ctk.CTkFrame(self, fg_color=COLORS["panel"], corner_radius=0)
+        header = ctk.CTkFrame(
+            self,
+            fg_color=COLORS["panel"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=0,
+        )
         header.pack(fill="x")
         ctk.CTkLabel(
             header,
-            text="Quiz review",
-            font=ctk.CTkFont(size=24, weight="bold"),
+            text="Review results",
+            font=_font(24, "bold", FONT_DISPLAY),
             text_color=COLORS["text"],
-        ).pack(side="left", padx=28, pady=22)
+        ).pack(side="left", padx=26, pady=20)
         ctk.CTkLabel(
             header,
             text=f"{score}/{total}  ·  {percentage}%  ·  {_format_duration(elapsed)}",
-            font=ctk.CTkFont(size=16, weight="bold"),
-            text_color=COLORS["green"] if percentage >= 70 else COLORS["amber"],
-        ).pack(side="right", padx=28, pady=22)
+            font=_font(15, "bold", FONT_MONO),
+            text_color=COLORS["success_text"] if percentage >= 70 else COLORS["warning_text"],
+            fg_color=COLORS["success_surface"] if percentage >= 70 else COLORS["amber_dark"],
+            corner_radius=8,
+        ).pack(side="right", padx=26, pady=16)
 
         body = ctk.CTkScrollableFrame(self, fg_color=COLORS["window"], corner_radius=0)
-        body.pack(fill="both", expand=True, padx=20, pady=20)
+        body.pack(fill="both", expand=True, padx=18, pady=18)
         body.grid_columnconfigure(0, weight=1)
 
         for index, question in enumerate(quiz.questions):
@@ -317,28 +384,30 @@ class ReviewWindow(ctk.CTkToplevel):
                 body,
                 fg_color=COLORS["panel"],
                 border_width=1,
-                border_color=COLORS["green"] if is_correct else COLORS["red"],
-                corner_radius=14,
+                border_color=COLORS["success_border"] if is_correct else COLORS["red"],
+                corner_radius=12,
             )
-            card.grid(row=index, column=0, sticky="ew", padx=6, pady=7)
+            card.grid(row=index, column=0, sticky="ew", padx=4, pady=6)
             card.grid_columnconfigure(0, weight=1)
 
             status = "Correct" if is_correct else "Incorrect"
             ctk.CTkLabel(
                 card,
                 text=f"{index + 1}. {question.get('question', '')}",
-                font=ctk.CTkFont(size=15, weight="bold"),
+                font=_font(15, "bold", FONT_DISPLAY),
                 text_color=COLORS["text"],
                 justify="left",
                 anchor="w",
-                wraplength=820,
-            ).grid(row=0, column=0, sticky="ew", padx=18, pady=(16, 8))
+                wraplength=580,
+            ).grid(row=0, column=0, sticky="ew", padx=16, pady=(15, 8))
             ctk.CTkLabel(
                 card,
                 text=status,
-                font=ctk.CTkFont(size=12, weight="bold"),
-                text_color=COLORS["green"] if is_correct else COLORS["red"],
-            ).grid(row=0, column=1, sticky="ne", padx=18, pady=(16, 8))
+                font=_font(11, "bold"),
+                text_color=COLORS["success_text"] if is_correct else COLORS["danger_text"],
+                fg_color=COLORS["success_surface"] if is_correct else COLORS["red_dark"],
+                corner_radius=7,
+            ).grid(row=0, column=1, sticky="ne", padx=16, pady=(14, 8))
 
             user_text = "Unanswered"
             if user_answer in options:
@@ -347,24 +416,24 @@ class ReviewWindow(ctk.CTkToplevel):
             ctk.CTkLabel(
                 card,
                 text=f"Your answer: {user_text}",
-                font=ctk.CTkFont(size=13),
-                text_color=COLORS["green"] if is_correct else COLORS["red"],
+                font=_font(13),
+                text_color=COLORS["success_text"] if is_correct else COLORS["danger_text"],
                 justify="left",
                 anchor="w",
-                wraplength=820,
-            ).grid(row=1, column=0, columnspan=2, sticky="ew", padx=18, pady=2)
+                wraplength=580,
+            ).grid(row=1, column=0, columnspan=2, sticky="ew", padx=16, pady=2)
             if not is_correct:
                 ctk.CTkLabel(
                     card,
                     text=f"Correct answer: {correct_text}",
-                    font=ctk.CTkFont(size=13),
-                    text_color=COLORS["green"],
+                    font=_font(13),
+                    text_color=COLORS["success_text"],
                     justify="left",
                     anchor="w",
-                    wraplength=820,
-                ).grid(row=2, column=0, columnspan=2, sticky="ew", padx=18, pady=(2, 16))
+                    wraplength=580,
+                ).grid(row=2, column=0, columnspan=2, sticky="ew", padx=16, pady=(2, 15))
             else:
-                ctk.CTkLabel(card, text="", height=4).grid(row=2, column=0, pady=(0, 8))
+                ctk.CTkLabel(card, text="", height=4).grid(row=2, column=0, pady=(0, 7))
 
         answer_key = "\n\n".join(
             "\n".join(
@@ -379,23 +448,23 @@ class ReviewWindow(ctk.CTkToplevel):
         ctk.CTkLabel(
             body,
             text="Answer key",
-            font=ctk.CTkFont(size=16, weight="bold"),
+            font=_font(16, "bold", FONT_DISPLAY),
             text_color=COLORS["text"],
             anchor="w",
-        ).grid(row=len(quiz.questions), column=0, sticky="w", padx=6, pady=(22, 8))
+        ).grid(row=len(quiz.questions), column=0, sticky="w", padx=4, pady=(20, 8))
 
         answer_key_card = ctk.CTkFrame(
             body,
             fg_color=COLORS["panel"],
             border_width=1,
             border_color=COLORS["border"],
-            corner_radius=14,
+            corner_radius=12,
         )
         answer_key_card.grid(
             row=len(quiz.questions) + 1,
             column=0,
             sticky="ew",
-            padx=6,
+            padx=4,
             pady=(0, 12),
         )
         answer_key_card.grid_columnconfigure(0, weight=1)
@@ -404,8 +473,8 @@ class ReviewWindow(ctk.CTkToplevel):
         answer_key_toolbar.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
             answer_key_toolbar,
-            text="Select the text below to copy or edit it.",
-            font=ctk.CTkFont(size=11),
+            text="Select, copy, or edit the answer key below.",
+            font=_font(11),
             text_color=COLORS["muted"],
             anchor="w",
         ).grid(row=0, column=0, sticky="w")
@@ -416,6 +485,10 @@ class ReviewWindow(ctk.CTkToplevel):
             height=32,
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_hover"],
+            corner_radius=8,
+            font=_font(11, "bold"),
+            text_color=COLORS["on_accent"],
+            text_color_disabled=COLORS["disabled_text"],
             command=self.copy_answer_key,
         )
         self.copy_answer_key_button.grid(row=0, column=1, padx=(10, 0))
@@ -425,9 +498,9 @@ class ReviewWindow(ctk.CTkToplevel):
             fg_color=COLORS["panel_alt"],
             border_width=1,
             border_color=COLORS["border"],
-            corner_radius=10,
+            corner_radius=9,
             wrap="word",
-            font=ctk.CTkFont(size=12),
+            font=_font(12, family=FONT_MONO),
             state="normal",
         )
         self.answer_key_textbox.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 14))
@@ -505,38 +578,59 @@ class QuizWindow(ctk.CTkToplevel):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
 
-        header = ctk.CTkFrame(self, fg_color=COLORS["panel"], corner_radius=0)
+        header = ctk.CTkFrame(
+            self,
+            fg_color=COLORS["panel"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=0,
+        )
         header.grid(row=0, column=0, sticky="ew")
         header.grid_columnconfigure(0, weight=1)
         self.heading_label = ctk.CTkLabel(
             header,
             text=f"Question 1 of {len(quiz.questions)}",
-            font=ctk.CTkFont(size=19, weight="bold"),
+            font=_font(19, "bold", FONT_DISPLAY),
             text_color=COLORS["text"],
         )
-        self.heading_label.grid(row=0, column=0, sticky="w", padx=28, pady=20)
+        self.heading_label.grid(row=0, column=0, sticky="w", padx=26, pady=18)
         self.timer_label = ctk.CTkLabel(
             header,
             text="0:00",
-            font=ctk.CTkFont(family="Consolas", size=15, weight="bold"),
-            text_color=COLORS["muted"],
+            font=_font(14, "bold", FONT_MONO),
+            text_color=COLORS["accent_hover"],
+            fg_color=COLORS["accent_soft"],
+            corner_radius=8,
         )
-        self.timer_label.grid(row=0, column=1, padx=28, pady=20)
+        self.timer_label.grid(row=0, column=1, padx=26, pady=14, ipadx=9, ipady=4)
 
-        self.number_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.number_frame.grid(row=1, column=0, sticky="ew", padx=26, pady=(18, 4))
-        self.number_frame.grid_columnconfigure(tuple(range(len(quiz.questions))), weight=1)
+        self.number_frame = ctk.CTkFrame(
+            self,
+            fg_color=COLORS["panel"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=12,
+        )
+        self.number_frame.grid(row=1, column=0, sticky="ew", padx=26, pady=(16, 2))
+        navigation_columns = min(10, max(1, len(quiz.questions)))
+        self.number_frame.grid_columnconfigure(tuple(range(navigation_columns)), weight=1)
         self.number_buttons: list[ctk.CTkButton] = []
         for index in range(len(quiz.questions)):
+            nav_row, nav_column = divmod(index, navigation_columns)
             button = ctk.CTkButton(
                 self.number_frame,
                 text=str(index + 1),
                 width=42,
-                height=36,
-                corner_radius=10,
+                height=32,
+                corner_radius=8,
+                font=_font(11, "bold", FONT_MONO),
+                border_width=1,
+                border_color=COLORS["border"],
+                text_color=COLORS["text"],
+                text_color_disabled=COLORS["disabled_text"],
                 command=lambda value=index: self.go_to(value),
             )
-            button.grid(row=0, column=index, sticky="ew", padx=3)
+            button.grid(row=nav_row, column=nav_column, sticky="ew", padx=3, pady=3)
             self.number_buttons.append(button)
 
         card = ctk.CTkFrame(
@@ -544,22 +638,22 @@ class QuizWindow(ctk.CTkToplevel):
             fg_color=COLORS["panel"],
             border_width=1,
             border_color=COLORS["border"],
-            corner_radius=18,
+            corner_radius=16,
         )
-        card.grid(row=2, column=0, sticky="nsew", padx=26, pady=18)
+        card.grid(row=2, column=0, sticky="nsew", padx=26, pady=16)
         card.grid_columnconfigure(0, weight=1)
         card.grid_rowconfigure(1, weight=1)
 
         self.question_label = ctk.CTkLabel(
             card,
             text="",
-            font=ctk.CTkFont(size=21, weight="bold"),
+            font=_font(21, "bold", FONT_DISPLAY),
             text_color=COLORS["text"],
             justify="left",
             anchor="nw",
-            wraplength=900,
+            wraplength=710,
         )
-        self.question_label.grid(row=0, column=0, sticky="ew", padx=28, pady=(28, 18))
+        self.question_label.grid(row=0, column=0, sticky="ew", padx=26, pady=(26, 16))
 
         options_frame = ctk.CTkFrame(card, fg_color="transparent")
         options_frame.grid(row=1, column=0, sticky="nsew", padx=28, pady=(0, 24))
@@ -569,14 +663,17 @@ class QuizWindow(ctk.CTkToplevel):
             button = ctk.CTkButton(
                 options_frame,
                 text="",
-                height=68,
+                height=64,
                 anchor="w",
-                font=ctk.CTkFont(size=14),
-                corner_radius=12,
+                border_spacing=16,
+                font=_font(14),
+                corner_radius=10,
                 border_width=1,
+                text_color=COLORS["text"],
+                text_color_disabled=COLORS["disabled_text"],
                 command=lambda value=letter: self.choose(value),
             )
-            button.grid(row=row, column=0, sticky="ew", pady=6)
+            button.grid(row=row, column=0, sticky="ew", pady=5)
             self.option_buttons[letter] = button
 
         footer = ctk.CTkFrame(self, fg_color="transparent")
@@ -587,8 +684,14 @@ class QuizWindow(ctk.CTkToplevel):
             text="Previous",
             width=120,
             height=42,
+            corner_radius=9,
+            font=_font(12, "bold"),
             fg_color=COLORS["panel_alt"],
             hover_color=COLORS["panel_hover"],
+            border_width=1,
+            border_color=COLORS["border"],
+            text_color=COLORS["text"],
+            text_color_disabled=COLORS["disabled_text"],
             command=self.previous,
         )
         self.previous_button.grid(row=0, column=0)
@@ -596,7 +699,7 @@ class QuizWindow(ctk.CTkToplevel):
             footer,
             text=f"0 of {len(quiz.questions)} answered",
             text_color=COLORS["muted"],
-            font=ctk.CTkFont(size=13),
+            font=_font(12),
         )
         self.answer_count_label.grid(row=0, column=1)
         self.next_button = ctk.CTkButton(
@@ -604,8 +707,14 @@ class QuizWindow(ctk.CTkToplevel):
             text="Next",
             width=120,
             height=42,
+            corner_radius=9,
+            font=_font(12, "bold"),
             fg_color=COLORS["panel_alt"],
             hover_color=COLORS["panel_hover"],
+            border_width=1,
+            border_color=COLORS["border"],
+            text_color=COLORS["text"],
+            text_color_disabled=COLORS["disabled_text"],
             command=self.next,
         )
         self.next_button.grid(row=0, column=2, padx=(0, 10))
@@ -614,8 +723,12 @@ class QuizWindow(ctk.CTkToplevel):
             text="Submit quiz",
             width=140,
             height=42,
+            corner_radius=9,
+            font=_font(12, "bold"),
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_hover"],
+            text_color=COLORS["on_accent"],
+            text_color_disabled=COLORS["disabled_text"],
             state="disabled",
             command=self.submit,
         )
@@ -681,24 +794,41 @@ class QuizWindow(ctk.CTkToplevel):
         for letter, button in self.option_buttons.items():
             is_selected = selected == letter
             button.configure(
-                text=f"  {letter}    {options.get(letter, '')}",
+                text=f"{letter}. {options.get(letter, '')}",
                 fg_color=COLORS["accent"] if is_selected else COLORS["panel_alt"],
                 hover_color=COLORS["accent_hover"] if is_selected else COLORS["panel_hover"],
-                border_color=COLORS["accent_hover"] if is_selected else COLORS["border"],
-                text_color=COLORS["text"],
+                border_color=COLORS["focus"] if is_selected else COLORS["border_strong"],
+                text_color=COLORS["on_accent"] if is_selected else COLORS["text"],
+                text_color_disabled=COLORS["disabled_text"],
             )
 
         for index, button in enumerate(self.number_buttons):
             if index == self.current_index:
                 color = COLORS["accent"]
                 hover = COLORS["accent_hover"]
+                text = str(index + 1)
+                text_color = COLORS["on_accent"]
+                border = COLORS["focus"]
             elif str(index) in self.answers:
-                color = COLORS["teal"]
-                hover = COLORS["teal"]
+                color = COLORS["success_surface"]
+                hover = COLORS["success_surface_hover"]
+                text = f"✓ {index + 1}"
+                text_color = COLORS["success_text"]
+                border = COLORS["success_border"]
             else:
                 color = COLORS["panel_alt"]
                 hover = COLORS["panel_hover"]
-            button.configure(fg_color=color, hover_color=hover)
+                text = str(index + 1)
+                text_color = COLORS["text"]
+                border = COLORS["border"]
+            button.configure(
+                text=text,
+                fg_color=color,
+                hover_color=hover,
+                border_color=border,
+                text_color=text_color,
+                text_color_disabled=COLORS["disabled_text"],
+            )
 
         answered = len(self.answers)
         self.answer_count_label.configure(text=f"{answered} of {total} answered")
@@ -896,36 +1026,55 @@ class QuizApp(ctk.CTk):
         self._startup_check_after = self.after(300, self._startup_state_check)
 
     def _build_header(self) -> None:
-        header = ctk.CTkFrame(self, height=78, fg_color=COLORS["panel"], corner_radius=0)
+        header = ctk.CTkFrame(
+            self,
+            height=86,
+            fg_color=COLORS["panel"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=0,
+        )
         header.pack(fill="x")
         header.pack_propagate(False)
 
         title_group = ctk.CTkFrame(header, fg_color="transparent")
-        title_group.pack(side="left", padx=26, pady=14)
+        title_group.pack(side="left", padx=24, pady=13)
         ctk.CTkLabel(
             title_group,
+            text="TQ",
+            width=38,
+            height=38,
+            font=_font(12, "bold", FONT_MONO),
+            text_color=COLORS["accent_hover"],
+            fg_color=COLORS["accent_soft"],
+            corner_radius=9,
+        ).pack(side="left", padx=(0, 12))
+        title_text = ctk.CTkFrame(title_group, fg_color="transparent")
+        title_text.pack(side="left")
+        ctk.CTkLabel(
+            title_text,
             text="Transcript Quiz",
-            font=ctk.CTkFont(size=23, weight="bold"),
+            font=_font(23, "bold", FONT_DISPLAY),
             text_color=COLORS["text"],
         ).pack(anchor="w")
         ctk.CTkLabel(
-            title_group,
-            text="Turn saved transcripts into focused practice.",
-            font=ctk.CTkFont(size=12),
+            title_text,
+            text="Build focused practice from saved transcripts.",
+            font=_font(12),
             text_color=COLORS["muted"],
         ).pack(anchor="w")
 
         model_group = ctk.CTkFrame(header, fg_color="transparent")
-        model_group.pack(side="left", padx=(30, 12), pady=9)
+        model_group.pack(side="left", padx=(28, 10), pady=10)
         ctk.CTkLabel(
             model_group,
-            text="Available models",
-            font=ctk.CTkFont(size=10, weight="bold"),
+            text="Model",
+            font=_font(10, "bold"),
             text_color=COLORS["muted"],
         ).pack(anchor="w", pady=(0, 3))
         self.model_selector = ctk.CTkComboBox(
             model_group,
-            width=330,
+            width=300,
             height=36,
             values=["Sign in to load models"],
             state="disabled",
@@ -934,27 +1083,35 @@ class QuizApp(ctk.CTk):
             button_color=COLORS["accent"],
             button_hover_color=COLORS["accent_hover"],
             text_color=COLORS["text"],
+            corner_radius=9,
+            font=_font(12),
             command=self._model_selection_changed,
         )
         self.model_selector.pack(anchor="w")
 
         auth_group = ctk.CTkFrame(header, fg_color="transparent")
-        auth_group.pack(side="right", padx=26, pady=14)
+        auth_group.pack(side="right", padx=24, pady=14)
         self.auth_text = ctk.CTkLabel(
             auth_group,
-            text="Checking OpenAI sign-in…",
-            font=ctk.CTkFont(size=12),
+            text="Checking sign-in…",
+            width=200,
+            font=_font(12),
             text_color=COLORS["muted"],
+            anchor="e",
         )
         self.auth_text.pack(side="left", padx=(0, 12))
         self.auth_button = ctk.CTkButton(
             auth_group,
             text="Please wait",
-            width=140,
+            width=116,
             height=38,
+            corner_radius=9,
+            font=_font(12, "bold"),
             state="disabled",
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_hover"],
+            text_color=COLORS["on_accent"],
+            text_color_disabled=COLORS["disabled_text"],
             command=self._auth_action,
         )
         self.auth_button.pack(side="left")
@@ -962,18 +1119,18 @@ class QuizApp(ctk.CTk):
     def _build_status_bar(self) -> None:
         self.status_frame = ctk.CTkFrame(
             self,
-            fg_color=COLORS["panel"],
+            fg_color=COLORS["panel_alt"],
             border_width=1,
             border_color=COLORS["border"],
-            corner_radius=12,
-            height=36,
+            corner_radius=9,
+            height=38,
         )
-        self.status_frame.pack(fill="x", padx=18, pady=(0, 12))
+        self.status_frame.pack(fill="x", padx=18, pady=(0, 14))
         self.status_frame.pack_propagate(False)
         self.status_label = ctk.CTkLabel(
             self.status_frame,
             text="",
-            font=ctk.CTkFont(size=12),
+            font=_font(12),
             text_color=COLORS["muted"],
             anchor="w",
         )
@@ -985,13 +1142,17 @@ class QuizApp(ctk.CTk):
         if self._destroyed or not hasattr(self, "status_label"):
             return
         color = {
-            "success": COLORS["green"],
+            "success": COLORS["success_text"],
             "error": COLORS["red"],
             "warning": COLORS["amber"],
             "info": COLORS["muted"],
         }.get(kind, COLORS["muted"])
         try:
-            self.status_label.configure(text=self._status_message, text_color=color)
+            self.status_label.configure(
+                text=_ellipsize(self._status_message, 170),
+                text_color=color,
+            )
+            self.status_frame.configure(border_color=color if kind != "info" else COLORS["border"])
         except BaseException:
             pass
 
@@ -1086,9 +1247,9 @@ class QuizApp(ctk.CTk):
 
     def _build_library(self) -> None:
         content = ctk.CTkFrame(self, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=18, pady=18)
+        content.pack(fill="both", expand=True, padx=18, pady=16)
         content.grid_rowconfigure(0, weight=1)
-        content.grid_columnconfigure(0, weight=24, minsize=270)
+        content.grid_columnconfigure(0, weight=24, minsize=280)
         content.grid_columnconfigure(1, weight=44, minsize=500)
         content.grid_columnconfigure(2, weight=32, minsize=370)
 
@@ -1097,7 +1258,7 @@ class QuizApp(ctk.CTk):
             fg_color=COLORS["panel"],
             border_width=1,
             border_color=COLORS["border"],
-            corner_radius=16,
+            corner_radius=14,
         )
         self.left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
         self.middle_panel = ctk.CTkFrame(
@@ -1105,7 +1266,7 @@ class QuizApp(ctk.CTk):
             fg_color=COLORS["panel"],
             border_width=1,
             border_color=COLORS["border"],
-            corner_radius=16,
+            corner_radius=14,
         )
         self.middle_panel.grid(row=0, column=1, sticky="nsew", padx=7)
         self.right_panel = ctk.CTkFrame(
@@ -1113,7 +1274,7 @@ class QuizApp(ctk.CTk):
             fg_color=COLORS["panel"],
             border_width=1,
             border_color=COLORS["border"],
-            corner_radius=16,
+            corner_radius=14,
         )
         self.right_panel.grid(row=0, column=2, sticky="nsew", padx=(7, 0))
 
@@ -1129,16 +1290,20 @@ class QuizApp(ctk.CTk):
         ctk.CTkLabel(
             title_row,
             text="Library",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            font=_font(18, "bold", FONT_DISPLAY),
             text_color=COLORS["text"],
         ).pack(side="left")
         self.new_button = ctk.CTkButton(
             title_row,
-            text="+ New",
-            width=74,
-            height=32,
+            text="New transcript",
+            width=118,
+            height=34,
+            corner_radius=8,
+            font=_font(11, "bold"),
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_hover"],
+            text_color=COLORS["on_accent"],
+            text_color_disabled=COLORS["disabled_text"],
             command=self._new_transcript,
         )
         self.new_button.pack(side="right")
@@ -1147,31 +1312,45 @@ class QuizApp(ctk.CTk):
         self.search_var.trace_add("write", self._schedule_search)
         search_row = ctk.CTkFrame(self.left_panel, fg_color="transparent")
         search_row.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 4))
-        search_row.grid_columnconfigure(0, weight=1)
+        search_row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(
+            search_row,
+            text="Search",
+            font=_font(10, "bold"),
+            text_color=COLORS["muted"],
+        ).grid(row=0, column=0, sticky="w", padx=(0, 8))
         self.search_entry = ctk.CTkEntry(
             search_row,
             textvariable=self.search_var,
-            placeholder_text="Search transcripts",
             height=38,
             fg_color=COLORS["panel_alt"],
             border_color=COLORS["border"],
+            corner_radius=9,
+            font=_font(12),
+            text_color=COLORS["text"],
         )
-        self.search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.search_entry.grid(row=0, column=1, sticky="ew", padx=(0, 6))
         self.clear_search_button = ctk.CTkButton(
             search_row,
             text="Clear",
             width=58,
             height=38,
+            corner_radius=9,
+            font=_font(11, "bold"),
             fg_color=COLORS["panel_alt"],
             hover_color=COLORS["panel_hover"],
+            border_width=1,
+            border_color=COLORS["border"],
+            text_color=COLORS["text"],
+            text_color_disabled=COLORS["disabled_text"],
             state="disabled",
             command=self._clear_search,
         )
-        self.clear_search_button.grid(row=0, column=1)
+        self.clear_search_button.grid(row=0, column=2)
         self.search_count_label = ctk.CTkLabel(
             self.left_panel,
-            text="0 results",
-            font=ctk.CTkFont(size=10),
+            text="0 transcripts",
+            font=_font(10, "bold"),
             text_color=COLORS["muted"],
             anchor="w",
         )
@@ -1191,14 +1370,14 @@ class QuizApp(ctk.CTk):
 
         ctk.CTkLabel(
             self.middle_panel,
-            text="Transcript",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            text="Transcript editor",
+            font=_font(18, "bold", FONT_DISPLAY),
             text_color=COLORS["text"],
         ).grid(row=0, column=0, sticky="w", padx=18, pady=(18, 4))
         ctk.CTkLabel(
             self.middle_panel,
-            text="Name",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            text="Transcript name",
+            font=_font(11, "bold"),
             text_color=COLORS["muted"],
         ).grid(row=1, column=0, sticky="w", padx=18, pady=(7, 4))
         self.name_entry = ctk.CTkEntry(
@@ -1207,6 +1386,8 @@ class QuizApp(ctk.CTk):
             height=38,
             fg_color=COLORS["panel_alt"],
             border_color=COLORS["border"],
+            corner_radius=9,
+            font=_font(12),
         )
         self.name_entry.grid(row=2, column=0, sticky="ew", padx=18)
         self.name_entry.bind("<KeyRelease>", lambda _event: self._update_editor_state())
@@ -1216,16 +1397,16 @@ class QuizApp(ctk.CTk):
             fg_color=COLORS["panel_alt"],
             border_width=1,
             border_color=COLORS["border"],
-            corner_radius=10,
+            corner_radius=11,
             wrap="word",
-            font=ctk.CTkFont(size=13),
+            font=_font(13),
         )
         self.transcript_text.grid(row=3, column=0, sticky="nsew", padx=18, pady=(10, 6))
         self.transcript_text.bind("<KeyRelease>", lambda _event: self._update_editor_state())
         self.editor_meta = ctk.CTkLabel(
             self.middle_panel,
-            text="Paste a transcript to begin",
-            font=ctk.CTkFont(size=11),
+            text="Paste a transcript to start",
+            font=_font(11),
             text_color=COLORS["muted"],
         )
         self.editor_meta.grid(row=4, column=0, sticky="w", padx=18)
@@ -1236,35 +1417,45 @@ class QuizApp(ctk.CTk):
         self.save_button = ctk.CTkButton(
             action_row,
             text="Save",
-            width=84,
-            height=38,
+            width=70,
+            height=36,
+            corner_radius=9,
+            font=_font(11, "bold"),
             fg_color=COLORS["panel_alt"],
             hover_color=COLORS["panel_hover"],
+            border_width=1,
+            border_color=COLORS["border"],
+            text_color=COLORS["text"],
+            text_color_disabled=COLORS["disabled_text"],
             command=self._save_current,
         )
         self.save_button.grid(row=0, column=0, padx=(0, 7))
         self.delete_button = ctk.CTkButton(
             action_row,
             text="Delete",
-            width=84,
-            height=38,
+            width=70,
+            height=36,
+            corner_radius=9,
+            font=_font(11, "bold"),
             fg_color=COLORS["red_dark"],
             hover_color=COLORS["red"],
+            text_color=COLORS["danger_text"],
+            text_color_disabled=COLORS["disabled_text"],
             command=self._delete_current,
         )
         self.delete_button.grid(row=0, column=1)
         question_count_group = ctk.CTkFrame(action_row, fg_color="transparent")
-        question_count_group.grid(row=0, column=2, sticky="w", padx=(16, 0))
+        question_count_group.grid(row=0, column=2, sticky="w", padx=(10, 0))
         ctk.CTkLabel(
             question_count_group,
-            text="Question count",
-            font=ctk.CTkFont(size=10, weight="bold"),
+            text="Questions",
+            font=_font(10, "bold"),
             text_color=COLORS["muted"],
-        ).pack(side="left", padx=(0, 7))
+        ).pack(side="left", padx=(0, 6))
         self.question_count_selector = ctk.CTkComboBox(
             question_count_group,
-            width=88,
-            height=36,
+            width=70,
+            height=34,
             values=[str(value) for value in QUESTION_COUNT_CHOICES],
             state="disabled",
             fg_color=COLORS["panel_alt"],
@@ -1272,6 +1463,8 @@ class QuizApp(ctk.CTk):
             button_color=COLORS["accent"],
             button_hover_color=COLORS["accent_hover"],
             text_color=COLORS["text"],
+            corner_radius=8,
+            font=_font(11),
             command=self._question_count_changed,
         )
         self.question_count_selector.pack(side="left")
@@ -1281,48 +1474,62 @@ class QuizApp(ctk.CTk):
         self.generate_button = ctk.CTkButton(
             action_row,
             text="Generate quiz",
-            width=138,
-            height=38,
+            width=112,
+            height=36,
+            corner_radius=9,
+            font=_font(11, "bold"),
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_hover"],
+            text_color=COLORS["on_accent"],
+            text_color_disabled=COLORS["disabled_text"],
             command=self._generate_quiz,
         )
         self.generate_button.grid(row=0, column=3, padx=(7, 0))
         self.cancel_generate_button = ctk.CTkButton(
             action_row,
             text="Cancel",
-            width=80,
-            height=38,
+            width=68,
+            height=36,
+            corner_radius=9,
+            font=_font(11, "bold"),
             fg_color=COLORS["red_dark"],
             hover_color=COLORS["red"],
+            text_color=COLORS["danger_text"],
+            text_color_disabled=COLORS["disabled_text"],
             command=self._cancel_generation,
         )
         self.cancel_generate_button.grid(row=0, column=4, padx=(7, 0))
         self.cancel_generate_button.grid_remove()
 
-        self.progress_frame = ctk.CTkFrame(self.middle_panel, fg_color="transparent")
+        self.progress_frame = ctk.CTkFrame(
+            self.middle_panel,
+            fg_color=COLORS["panel_alt"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=8,
+        )
         self.progress_frame.grid(row=6, column=0, sticky="ew", padx=18, pady=(4, 2))
         self.progress_frame.grid_columnconfigure(0, weight=1)
         self.progress_label = ctk.CTkLabel(
             self.progress_frame,
             text="",
-            font=ctk.CTkFont(size=11),
+            font=_font(11),
             text_color=COLORS["muted"],
         )
-        self.progress_label.grid(row=0, column=0, sticky="w")
+        self.progress_label.grid(row=0, column=0, sticky="w", padx=10, pady=(7, 0))
         self.progress_bar = ctk.CTkProgressBar(
             self.progress_frame,
             mode="indeterminate",
             height=5,
             progress_color=COLORS["accent"],
         )
-        self.progress_bar.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+        self.progress_bar.grid(row=1, column=0, sticky="ew", padx=10, pady=(5, 8))
         self.progress_frame.grid_remove()
 
         ctk.CTkLabel(
             self.middle_panel,
             text="Generated quizzes",
-            font=ctk.CTkFont(size=14, weight="bold"),
+            font=_font(14, "bold", FONT_DISPLAY),
             text_color=COLORS["text"],
         ).grid(row=7, column=0, sticky="w", padx=18, pady=(10, 4))
         self.quiz_list = ctk.CTkScrollableFrame(
@@ -1339,34 +1546,39 @@ class QuizApp(ctk.CTk):
         ctk.CTkLabel(
             self.right_panel,
             text="Quiz details",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            font=_font(18, "bold", FONT_DISPLAY),
             text_color=COLORS["text"],
         ).grid(row=0, column=0, sticky="w", padx=18, pady=(18, 4))
         self.quiz_detail_title = ctk.CTkLabel(
             self.right_panel,
             text="Select a quiz",
-            font=ctk.CTkFont(size=16, weight="bold"),
+            font=_font(16, "bold", FONT_DISPLAY),
             text_color=COLORS["text"],
             justify="left",
             anchor="w",
+            wraplength=320,
         )
         self.quiz_detail_title.grid(row=1, column=0, sticky="ew", padx=18, pady=(14, 3))
         self.quiz_detail_meta = ctk.CTkLabel(
             self.right_panel,
             text="Choose a generated quiz to take it or review past attempts.",
-            font=ctk.CTkFont(size=12),
+            font=_font(12),
             text_color=COLORS["muted"],
             justify="left",
             anchor="w",
-            wraplength=330,
+            wraplength=320,
         )
         self.quiz_detail_meta.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 12))
         self.take_quiz_button = ctk.CTkButton(
             self.right_panel,
             text="Take quiz",
             height=42,
+            corner_radius=9,
+            font=_font(12, "bold"),
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_hover"],
+            text_color=COLORS["on_accent"],
+            text_color_disabled=COLORS["disabled_text"],
             state="disabled",
             command=self._start_quiz,
         )
@@ -1377,13 +1589,13 @@ class QuizApp(ctk.CTk):
         ctk.CTkLabel(
             self.right_panel,
             text="Attempts",
-            font=ctk.CTkFont(size=14, weight="bold"),
+            font=_font(14, "bold", FONT_DISPLAY),
             text_color=COLORS["text"],
         ).grid(row=5, column=0, sticky="w", padx=18)
         self.attempt_summary = ctk.CTkLabel(
             self.right_panel,
             text="No quiz selected",
-            font=ctk.CTkFont(size=11),
+            font=_font(11),
             text_color=COLORS["muted"],
         )
         self.attempt_summary.grid(row=6, column=0, sticky="w", padx=18, pady=(2, 6))
@@ -1543,8 +1755,9 @@ class QuizApp(ctk.CTk):
                 return
             try:
                 if self.progress_frame.winfo_exists():
-                    self.progress_label.configure(text=str(message))
-                    self._set_status(str(message), "info")
+                    display_message = _ellipsize(message, 82)
+                    self.progress_label.configure(text=display_message)
+                    self._set_status(display_message, "info")
             except BaseException as exc:
                 try:
                     self._report_ui_callback_error(exc, "Could not update generation progress")
@@ -1725,7 +1938,7 @@ class QuizApp(ctk.CTk):
 
         if not normalized:
             try:
-                self.api.set_preferred_model(None)
+                self.api.reset_to_application_default()
             except BaseException:
                 pass
             self._set_model_selector_message("No available models")
@@ -1741,9 +1954,10 @@ class QuizApp(ctk.CTk):
             return
 
         preferred = self.api.get_preferred_model()
+        application_default = _DEFAULT_PREFERRED_MODEL if preferred is None else preferred
         fallback_message: str | None = None
-        if preferred is not None and preferred in seen_ids:
-            selected_id = preferred
+        if application_default in seen_ids:
+            selected_id = application_default
         else:
             selected_id = default_id
             if preferred is not None:
@@ -1752,14 +1966,9 @@ class QuizApp(ctk.CTk):
                     f"using account default {default_id}."
                 )
                 try:
-                    self.api.set_preferred_model(None)
+                    self.api.reset_to_application_default()
                 except BaseException as exc:
                     self._report_ui_callback_error(exc, "Could not reset the unavailable model")
-        if selected_id == default_id:
-            try:
-                self.api.set_preferred_model(None)
-            except BaseException as exc:
-                self._report_ui_callback_error(exc, "Could not select the account default")
 
         display_to_id: dict[str, str] = {}
         id_to_display: dict[str, str] = {}
@@ -1819,7 +2028,7 @@ class QuizApp(ctk.CTk):
             self._set_status("Choose one of the live available models.", "warning")
             return
         try:
-            self.api.set_preferred_model(None if model_id == self._model_default_id else model_id)
+            self.api.set_preferred_model(model_id)
         except BaseException as exc:
             self._set_status(f"Could not select model: {_safe_exception_message(exc)}", "error")
             if self._selected_model_id is not None:
@@ -1848,7 +2057,7 @@ class QuizApp(ctk.CTk):
                 # catalog selected a fallback.  Keep the API on its account
                 # default rather than turning that fallback into a stale
                 # preference based on an older selector snapshot.
-                self.api.set_preferred_model(None)
+                self.api.reset_to_application_default()
                 self._set_model_selector_value(display)
             except BaseException as exc:
                 self._report_ui_callback_error(exc, "Could not update the selected model")
@@ -1862,7 +2071,7 @@ class QuizApp(ctk.CTk):
             return None
 
         try:
-            self.api.set_preferred_model(None)
+            self.api.reset_to_application_default()
         except BaseException:
             pass
         self._selected_model_id = model_id
@@ -1890,8 +2099,16 @@ class QuizApp(ctk.CTk):
             identity = status.email or "OpenAI account"
             plan = f" · {status.plan_type}" if status.plan_type else ""
             try:
-                self.auth_text.configure(text=f"{identity}{plan}", text_color=COLORS["teal"])
-                self.auth_button.configure(text="Sign out", state="normal", fg_color=COLORS["panel_alt"])
+                self.auth_text.configure(text=f"{identity}{plan}", text_color=COLORS["success_text"])
+                self.auth_button.configure(
+                    text="Sign out",
+                    state="normal",
+                    fg_color=COLORS["panel_alt"],
+                    hover_color=COLORS["panel_hover"],
+                    border_width=1,
+                    border_color=COLORS["border"],
+                    text_color=COLORS["text"],
+                )
             except BaseException as exc:
                 self._report_ui_callback_error(exc)
             self._set_status(f"Signed in as {identity} — ready to generate.", "success")
@@ -1902,13 +2119,20 @@ class QuizApp(ctk.CTk):
             self._model_loading = False
             self._model_load_token = None
             try:
-                self.api.set_preferred_model(None)
+                self.api.reset_to_application_default()
             except BaseException as exc:
                 self._report_ui_callback_error(exc, "Could not clear the account model selection")
             self._set_model_selector_message("Sign in to load models")
             try:
-                self.auth_text.configure(text="Not signed in", text_color=COLORS["muted"])
-                self.auth_button.configure(text="Sign in with OpenAI", state="normal", fg_color=COLORS["accent"])
+                self.auth_text.configure(text="Signed out", text_color=COLORS["muted"])
+                self.auth_button.configure(
+                    text="Sign in",
+                    state="normal",
+                    fg_color=COLORS["accent"],
+                    hover_color=COLORS["accent_hover"],
+                    border_width=0,
+                    text_color=COLORS["on_accent"],
+                )
             except BaseException as exc:
                 self._report_ui_callback_error(exc)
             self._set_status("Sign in required before generating a quiz.", "warning")
@@ -1976,6 +2200,7 @@ class QuizApp(ctk.CTk):
 
         def success(status: AuthStatus) -> None:
             finish_dialog()
+            self.api.reset_to_application_default()
             self._apply_auth_status(status)
             self._resume_pending_generation()
 
@@ -2093,15 +2318,22 @@ class QuizApp(ctk.CTk):
             _clear_children(self.transcript_list)
             self._transcript_buttons.clear()
             search = self.search_var.get().strip()
-            result_word = "result" if len(records) == 1 else "results"
+            result_word = "transcript" if len(records) == 1 else "transcripts"
             self.search_count_label.configure(text=f"{len(records)} {result_word}")
             if not records:
                 ctk.CTkLabel(
                     self.transcript_list,
-                    text="No saved transcripts" if not search else "No matching transcripts",
+                    text=(
+                        "No transcripts saved yet.\nCreate one to get started."
+                        if not search
+                        else "No transcripts match this search."
+                    ),
                     text_color=COLORS["muted"],
-                    font=ctk.CTkFont(size=12),
-                ).grid(row=0, column=0, sticky="w", padx=10, pady=14)
+                    font=_font(12),
+                    justify="left",
+                    anchor="w",
+                    wraplength=240,
+                ).grid(row=0, column=0, sticky="w", padx=10, pady=18)
                 self._set_status(
                     "Search complete — no matching transcripts." if search else "Library loaded — no saved transcripts.",
                     "info",
@@ -2119,23 +2351,27 @@ class QuizApp(ctk.CTk):
                     ctk.CTkLabel(
                         self.transcript_list,
                         text=group.upper(),
-                        font=ctk.CTkFont(size=10, weight="bold"),
-                        text_color=COLORS["muted"],
+                        font=_font(10, "bold", FONT_MONO),
+                        text_color=COLORS["subtle"],
                     ).grid(row=row, column=0, sticky="w", padx=10, pady=(12, 4))
                     row += 1
-                preview = " ".join(record.content.split())[:55]
-                text = record.name if not preview else f"{record.name}\n{preview}"
+                display_name = _ellipsize(record.name, 32)
+                preview = _ellipsize(record.content, 40)
+                text = display_name if not preview else f"{display_name}\n{preview}"
                 selected = record.id == selected_id
                 button = ctk.CTkButton(
                     self.transcript_list,
                     text=text,
-                    height=58,
+                    height=64,
                     anchor="w",
-                    font=ctk.CTkFont(size=12, weight="bold" if selected else "normal"),
-                    fg_color=COLORS["accent"] if selected else "transparent",
+                    font=_font(12, "bold" if selected else "normal"),
+                    fg_color=COLORS["accent_soft"] if selected else COLORS["panel_alt"],
                     hover_color=COLORS["panel_hover"],
-                    border_width=1 if selected else 0,
-                    border_color=COLORS["accent_hover"],
+                    border_width=1,
+                    border_color=COLORS["focus"] if selected else COLORS["border"],
+                    corner_radius=9,
+                    text_color=COLORS["text"],
+                    text_color_disabled=COLORS["disabled_text"],
                     state="disabled" if self._controls_blocked() else "normal",
                     command=lambda value=record.id: self._select_transcript(value),
                 )
@@ -2162,7 +2398,7 @@ class QuizApp(ctk.CTk):
             count = len(content)
             dirty = (name, content) != self._editor_snapshot
             suffix = " · Unsaved changes" if dirty else ""
-            self.editor_meta.configure(text=f"{count:,} characters{suffix}" if count else f"Paste a transcript to begin{suffix}")
+            self.editor_meta.configure(text=f"{count:,} characters{suffix}" if count else f"Paste a transcript to start{suffix}")
             self._update_control_states()
         except BaseException as exc:
             self._report_ui_callback_error(exc)
@@ -2206,7 +2442,7 @@ class QuizApp(ctk.CTk):
                 self.quiz_list,
                 text="Save this transcript before generating a quiz.",
                 text_color=COLORS["muted"],
-                font=ctk.CTkFont(size=11),
+                font=_font(11),
             ).grid(row=0, column=0, sticky="w", padx=10, pady=12)
             self._clear_quiz_details()
             search_was_active = bool(self.search_var.get().strip())
@@ -2388,10 +2624,11 @@ class QuizApp(ctk.CTk):
             if not quizzes:
                 ctk.CTkLabel(
                     self.quiz_list,
-                    text="No quizzes yet. Generate one from this transcript.",
+                    text="No quizzes yet.\nGenerate one from this transcript.",
                     text_color=COLORS["muted"],
-                    font=ctk.CTkFont(size=11),
-                ).grid(row=0, column=0, sticky="w", padx=10, pady=12)
+                    font=_font(11),
+                    justify="left",
+                ).grid(row=0, column=0, sticky="w", padx=10, pady=16)
                 self._clear_quiz_details()
                 return
 
@@ -2411,18 +2648,30 @@ class QuizApp(ctk.CTk):
                 return
 
             for row, quiz in enumerate(quizzes):
-                item_frame = ctk.CTkFrame(self.quiz_list, fg_color="transparent")
+                item_frame = ctk.CTkFrame(
+                    self.quiz_list,
+                    fg_color=COLORS["panel_alt"],
+                    border_width=1,
+                    border_color=COLORS["border"],
+                    corner_radius=10,
+                )
                 item_frame.grid(row=row, column=0, sticky="ew", padx=2, pady=3)
                 item_frame.grid_columnconfigure(0, weight=1)
                 selected = quiz.id == existing_selected
+                display_name = _ellipsize(quiz.name, 42)
                 button = ctk.CTkButton(
                     item_frame,
-                    text=f"{quiz.name}\n{len(quiz.questions)} questions · {_format_datetime(quiz.created_at)}",
-                    height=62,
+                    text=f"{display_name}\n{len(quiz.questions)} questions · {_format_datetime(quiz.created_at)}",
+                    height=60,
                     anchor="w",
-                    font=ctk.CTkFont(size=11),
-                    fg_color=COLORS["accent"] if selected else COLORS["panel_alt"],
+                    font=_font(11, "bold" if selected else "normal"),
+                    fg_color=COLORS["accent_soft"] if selected else "transparent",
                     hover_color=COLORS["panel_hover"],
+                    border_width=1,
+                    border_color=COLORS["focus"] if selected else COLORS["border"],
+                    corner_radius=8,
+                    text_color=COLORS["text"],
+                    text_color_disabled=COLORS["disabled_text"],
                     state="disabled" if self._controls_blocked() else "normal",
                     command=lambda value=quiz.id: self._select_quiz(value),
                 )
@@ -2431,10 +2680,16 @@ class QuizApp(ctk.CTk):
                 rename_button = ctk.CTkButton(
                     item_frame,
                     text="Rename",
-                    width=68,
-                    height=30,
-                    fg_color=COLORS["panel_alt"],
+                    width=62,
+                    height=28,
+                    corner_radius=8,
+                    font=_font(10, "bold"),
+                    fg_color=COLORS["panel_hover"],
                     hover_color=COLORS["panel_hover"],
+                    border_width=1,
+                    border_color=COLORS["border_strong"],
+                    text_color=COLORS["text"],
+                    text_color_disabled=COLORS["disabled_text"],
                     state="disabled" if self._controls_blocked() else "normal",
                     command=lambda value=quiz.id: self._rename_quiz(value),
                 )
@@ -2443,10 +2698,14 @@ class QuizApp(ctk.CTk):
                 delete_button = ctk.CTkButton(
                     item_frame,
                     text="Delete",
-                    width=60,
-                    height=30,
+                    width=58,
+                    height=28,
+                    corner_radius=8,
+                    font=_font(10, "bold"),
                     fg_color=COLORS["red_dark"],
                     hover_color=COLORS["red"],
+                    text_color=COLORS["danger_text"],
+                    text_color_disabled=COLORS["disabled_text"],
                     state="disabled" if self._controls_blocked() else "normal",
                     command=lambda value=quiz.id: self._delete_quiz(value),
                 )
@@ -2633,26 +2892,34 @@ class QuizApp(ctk.CTk):
                 self.attempt_summary.configure(text="No attempts yet")
                 ctk.CTkLabel(
                     self.attempt_list,
-                    text="Take the quiz to create your first result.",
+                    text="No results yet.\nTake the quiz to create one.",
                     text_color=COLORS["muted"],
-                    font=ctk.CTkFont(size=11),
-                    wraplength=300,
+                    font=_font(11),
+                    wraplength=320,
                     justify="left",
                 ).grid(row=0, column=0, sticky="w", padx=10, pady=12)
                 return
             best = max(attempt.score for attempt in attempts)
-            self.attempt_summary.configure(text=f"{len(attempts)} attempt{'s' if len(attempts) != 1 else ''} · Best {best}/{attempts[0].total}")
+            self.attempt_summary.configure(
+                text=f"{len(attempts)} attempt{'s' if len(attempts) != 1 else ''} · Best {best}/{attempts[0].total}"
+            )
             for row, attempt in enumerate(attempts):
                 percentage = round((attempt.score / attempt.total) * 100) if attempt.total else 0
-                color = COLORS["green_dark"] if percentage >= 70 else COLORS["red_dark"]
+                color = COLORS["success_surface"] if percentage >= 70 else COLORS["red_dark"]
+                status_color = COLORS["success_border"] if percentage >= 70 else COLORS["red"]
                 button = ctk.CTkButton(
                     self.attempt_list,
                     text=f"{attempt.score}/{attempt.total}  ·  {percentage}%\n{_format_datetime(attempt.completed_at)}",
-                    height=54,
+                    height=58,
                     anchor="w",
-                    font=ctk.CTkFont(size=11),
+                    font=_font(11, "bold" if percentage >= 70 else "normal"),
                     fg_color=color,
-                    hover_color=COLORS["panel_hover"],
+                    hover_color=COLORS["success_surface_hover"] if percentage >= 70 else COLORS["panel_hover"],
+                    border_width=1,
+                    border_color=status_color,
+                    corner_radius=9,
+                    text_color=COLORS["success_text"] if percentage >= 70 else COLORS["danger_text"],
+                    text_color_disabled=COLORS["disabled_text"],
                     state="disabled" if self._controls_blocked() else "normal",
                     command=lambda value=attempt.id: self._open_saved_review(value),
                 )
@@ -2936,7 +3203,7 @@ class QuizApp(ctk.CTk):
             self.auth_button.configure(state="disabled" if busy else "normal")
             if busy:
                 self.cancel_generate_button.configure(state="normal")
-                self.progress_label.configure(text=message)
+                self.progress_label.configure(text=_ellipsize(message, 82))
                 self.progress_frame.grid()
                 self.progress_bar.start()
                 self.cancel_generate_button.grid()

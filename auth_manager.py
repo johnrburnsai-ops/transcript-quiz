@@ -184,4 +184,4 @@ class AuthManager:
             raise
 
     def sign_out(self) -> None:
-        self.api.request("account/logout", {})
+        self.api.clear_auth()
