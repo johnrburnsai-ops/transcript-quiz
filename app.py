@@ -70,6 +70,35 @@ FONT_MONO = "Consolas"
 def _font(size: int, weight: str = "normal", family: str = FONT_BODY) -> ctk.CTkFont:
     return ctk.CTkFont(family=family, size=size, weight=weight)
 
+
+class _QuestionCountComboBox(ctk.CTkComboBox):
+    """Keep the native dropdown on-screen when the control is near the bottom."""
+
+    def _open_dropdown_menu(self) -> None:
+        menu = self._dropdown_menu
+        menu_height = menu.winfo_reqheight()
+        widget_top = self.winfo_rooty()
+        widget_bottom = widget_top + self.winfo_height()
+        screen_top = self.winfo_vrooty()
+        screen_bottom = screen_top + self.winfo_screenheight()
+        menu_gap = self._apply_widget_scaling(3)
+        space_above = widget_top - screen_top - menu_gap
+        space_below = screen_bottom - widget_bottom - menu_gap
+
+        # CTkComboBox normally posts its native Tk menu below the widget.  At
+        # the bottom of this layout Windows clips that menu, hiding 35–50.
+        # Post it above instead when that gives the complete list room; when
+        # neither side fits, use the side with more room so native menu
+        # scrolling remains the fallback rather than losing the last entries.
+        open_above = menu_height > space_below and space_above > space_below
+        if open_above:
+            menu.open(self.winfo_rootx(), widget_top - menu_height - menu_gap)
+        else:
+            menu.open(self.winfo_rootx(), widget_bottom)
+
+        self._close_on_next_click = True
+
+
 QUESTION_COUNT_CHOICES = (5, 10, 15, 20, 25, 30, 35, 40, 45, 50)
 DEFAULT_QUESTION_COUNT = 10
 QUESTION_COUNT_MIN = 1
@@ -1452,7 +1481,7 @@ class QuizApp(ctk.CTk):
             font=_font(10, "bold"),
             text_color=COLORS["muted"],
         ).pack(side="left", padx=(0, 6))
-        self.question_count_selector = ctk.CTkComboBox(
+        self.question_count_selector = _QuestionCountComboBox(
             question_count_group,
             width=70,
             height=34,
