@@ -385,7 +385,17 @@ class Database:
                 )
                 record_id = int(cursor.lastrowid)
                 if name is None:
-                    name = f"Quiz {record_id}"
+                    existing_names = {
+                        str(row["name"])
+                        for row in connection.execute(
+                            "SELECT name FROM quizzes WHERE transcript_id = ?",
+                            (transcript_id,),
+                        ).fetchall()
+                    }
+                    number = 1
+                    while f"Quiz {number}" in existing_names:
+                        number += 1
+                    name = f"Quiz {number}"
                     connection.execute(
                         "UPDATE quizzes SET name = ? WHERE id = ?",
                         (name, record_id),

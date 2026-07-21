@@ -84,7 +84,7 @@ class DatabaseTests(unittest.TestCase):
             quiz = database.save_quiz(first.id, _quiz_data())
             self.assertEqual(database.get_quiz(quiz.id), quiz)
             self.assertEqual(database.list_quizzes(first.id), [quiz])
-            self.assertEqual(quiz.name, f"Quiz {quiz.id}")
+            self.assertEqual(quiz.name, "Quiz 1")
             attempt = database.save_attempt(
                 quiz.id,
                 {str(index): "A" for index in range(10)},
@@ -119,6 +119,7 @@ class DatabaseTests(unittest.TestCase):
         database = Database(":memory:")
         transcript = database.save_transcript("Lecture", "Content")
         quiz = database.save_quiz(transcript.id, _quiz_data(5), name="Five questions")
+        remaining_quiz = database.save_quiz(transcript.id, _quiz_data(5), name="Another quiz")
         self.assertEqual(quiz.name, "Five questions")
         renamed = database.update_quiz_name(quiz.id, "Renamed quiz")
         self.assertEqual(renamed.name, "Renamed quiz")
@@ -131,10 +132,46 @@ class DatabaseTests(unittest.TestCase):
             5,
             "2026-07-16T10:00:00Z",
         )
+        remaining_attempt = database.save_attempt(
+            remaining_quiz.id,
+            {str(index): "A" for index in range(5)},
+            5,
+            5,
+            "2026-07-16T10:00:00Z",
+        )
         self.assertTrue(database.delete_quiz(quiz.id))
         self.assertFalse(database.delete_quiz(quiz.id))
         self.assertIsNone(database.get_quiz(quiz.id))
         self.assertIsNone(database.get_attempt(attempt.id))
+        self.assertEqual(database.get_quiz(remaining_quiz.id), remaining_quiz)
+        self.assertEqual(database.get_attempt(remaining_attempt.id), remaining_attempt)
+
+    def test_default_quiz_names_are_scoped_and_reused(self) -> None:
+        database = Database(":memory:")
+        target = database.save_transcript("Target", "Target content")
+        other = database.save_transcript("Other", "Other content")
+
+        other_quiz = database.save_quiz(other.id, _quiz_data())
+        first_default = database.save_quiz(target.id, _quiz_data())
+        second_default = database.save_quiz(target.id, _quiz_data())
+
+        self.assertEqual(other_quiz.name, "Quiz 1")
+        self.assertEqual(first_default.name, "Quiz 1")
+        self.assertEqual(second_default.name, "Quiz 2")
+        self.assertGreater(first_default.id, other_quiz.id)
+
+        self.assertTrue(database.delete_quiz(first_default.id))
+        self.assertTrue(database.delete_quiz(second_default.id))
+
+        custom_quiz = database.save_quiz(target.id, _quiz_data(), name="Quiz 1")
+        after_custom = database.save_quiz(target.id, _quiz_data())
+        self.assertEqual(custom_quiz.name, "Quiz 1")
+        self.assertEqual(after_custom.name, "Quiz 2")
+        self.assertTrue(database.delete_quiz(custom_quiz.id))
+        self.assertTrue(database.delete_quiz(after_custom.id))
+
+        reused = database.save_quiz(target.id, _quiz_data())
+        self.assertEqual(reused.name, "Quiz 1")
 
     def test_migrates_v1_quiz_names(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

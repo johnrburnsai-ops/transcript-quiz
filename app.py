@@ -70,7 +70,7 @@ FONT_MONO = "Consolas"
 def _font(size: int, weight: str = "normal", family: str = FONT_BODY) -> ctk.CTkFont:
     return ctk.CTkFont(family=family, size=size, weight=weight)
 
-QUESTION_COUNT_CHOICES = (5, 10, 15, 20, 25, 30)
+QUESTION_COUNT_CHOICES = (5, 10, 15, 20, 25, 30, 35, 40, 45, 50)
 DEFAULT_QUESTION_COUNT = 10
 QUESTION_COUNT_MIN = 1
 QUESTION_COUNT_MAX = 50
@@ -2598,8 +2598,6 @@ class QuizApp(ctk.CTk):
     def _refresh_quizzes(
         self,
         select_id: int | None = None,
-        *,
-        clear_selection: bool = False,
     ) -> None:
         if self._closing or self._destroyed:
             return
@@ -2633,10 +2631,6 @@ class QuizApp(ctk.CTk):
                 return
 
             available_ids = {quiz.id for quiz in quizzes}
-            if clear_selection:
-                self._clear_quiz_details()
-                return
-
             existing_selected = select_id
             if existing_selected is None and self.selected_quiz is not None:
                 existing_selected = self.selected_quiz.id
@@ -2782,7 +2776,7 @@ class QuizApp(ctk.CTk):
         if quiz is None:
             if self.selected_quiz and self.selected_quiz.id == quiz_id:
                 self._clear_quiz_details()
-                self._refresh_quizzes(clear_selection=True)
+                self._refresh_quizzes()
             else:
                 self._refresh_quizzes()
             self._set_status("That quiz is already deleted; refreshed the quiz list.", "warning")
@@ -2813,7 +2807,7 @@ class QuizApp(ctk.CTk):
         was_selected = self.selected_quiz is not None and self.selected_quiz.id == quiz_id
         if was_selected:
             self._clear_quiz_details()
-            self._refresh_quizzes(clear_selection=True)
+            self._refresh_quizzes()
         else:
             self._refresh_quizzes()
         self._set_status(delete_status, "warning" if not deleted else "success")
@@ -3254,7 +3248,7 @@ class QuizApp(ctk.CTk):
             return
         if current_quiz is None:
             self._clear_quiz_details()
-            self._refresh_quizzes(clear_selection=True)
+            self._refresh_quizzes()
             self._set_status("That quiz was deleted before it could be started.", "warning")
             return
         quiz = current_quiz
