@@ -49,10 +49,10 @@ ELECTRIC_BLUE_COLORS: dict[str, str] = {
 
 
 CHERRY_BLOSSOM_COLORS: dict[str, str] = {
-    "window": "#FFF9F7",
-    "panel": "#FFFFFF",
-    "panel_alt": "#FFF0F3",
-    "panel_hover": "#F9DCE4",
+    "window": "#F0D6E0",
+    "panel": "#F4DCE5",
+    "panel_alt": "#E7C0CF",
+    "panel_hover": "#DCA7BC",
     "border": "#E8C6CF",
     "border_strong": "#D3AAB7",
     "text": "#3E3940",
@@ -177,10 +177,10 @@ MOSS_TERMINAL_COLORS: dict[str, str] = {
 
 
 EMBER_STUDY_COLORS: dict[str, str] = {
-    "window": "#FFF8F0",
-    "panel": "#FFFCF8",
-    "panel_alt": "#F6EADF",
-    "panel_hover": "#EED8C8",
+    "window": "#F1DDD0",
+    "panel": "#F5E3D8",
+    "panel_alt": "#E7C7B4",
+    "panel_hover": "#D8A992",
     "border": "#E1C5B3",
     "border_strong": "#C9A38C",
     "text": "#35251F",
@@ -241,20 +241,20 @@ OXBLOOD_LEDGER_COLORS: dict[str, str] = {
 
 
 PARCHMENT_INK_COLORS: dict[str, str] = {
-    "window": "#F3EBDD",
-    "panel": "#FFF9EF",
-    "panel_alt": "#E9DDC8",
-    "panel_hover": "#DCC9AC",
-    "border": "#CDBB9F",
-    "border_strong": "#AA9475",
+    "window": "#E5C9AB",
+    "panel": "#EED8BD",
+    "panel_alt": "#D9B795",
+    "panel_hover": "#C89A78",
+    "border": "#B58D72",
+    "border_strong": "#8F674F",
     "text": "#28231F",
     "muted": "#706354",
     "subtle": "#9D8C76",
-    "accent": "#284B63",
-    "accent_hover": "#1D394C",
-    "accent_soft": "#D6E2E8",
-    "on_accent": "#FFFFFF",
-    "focus": "#52758A",
+    "accent": "#7A3F4D",
+    "accent_hover": "#63303E",
+    "accent_soft": "#E7C8C5",
+    "on_accent": "#FFF3E5",
+    "focus": "#A06A78",
     "teal": "#4D8A7A",
     "green": "#4D8A7A",
     "green_dark": "#D8E9DF",
@@ -273,10 +273,10 @@ PARCHMENT_INK_COLORS: dict[str, str] = {
 
 
 ARCTIC_GLASS_COLORS: dict[str, str] = {
-    "window": "#EDF5F8",
-    "panel": "#F9FCFD",
-    "panel_alt": "#DDEBF0",
-    "panel_hover": "#C9DDE5",
+    "window": "#D8E6ED",
+    "panel": "#E2EDF2",
+    "panel_alt": "#C0D4DE",
+    "panel_hover": "#A9C3D0",
     "border": "#B7CCD5",
     "border_strong": "#91AAB6",
     "text": "#20333B",
@@ -369,10 +369,10 @@ COPPER_CIRCUIT_COLORS: dict[str, str] = {
 
 
 SAGE_PAPER_COLORS: dict[str, str] = {
-    "window": "#EEF2E8",
-    "panel": "#FCFDF8",
-    "panel_alt": "#E2E9D9",
-    "panel_hover": "#D1DDC6",
+    "window": "#DDE8D9",
+    "panel": "#E7EFDF",
+    "panel_alt": "#C8D9C3",
+    "panel_hover": "#B0C6AD",
     "border": "#BBCAB0",
     "border_strong": "#98A98E",
     "text": "#28372D",

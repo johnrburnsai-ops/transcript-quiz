@@ -6,6 +6,7 @@ from theme import (
     CHERRY_BLOSSOM_COLORS,
     DEFAULT_THEME_NAME,
     ELECTRIC_BLUE_COLORS,
+    PARCHMENT_INK_COLORS,
     THEME_NAMES,
     THEME_PRESETS,
     resolve_theme_name,
@@ -48,9 +49,27 @@ class ThemePresetTests(unittest.TestCase):
         preset = THEME_PRESETS["Cherry Blossom"]
         self.assertEqual(preset.appearance_mode, "light")
         self.assertEqual(preset.colors, CHERRY_BLOSSOM_COLORS)
-        self.assertEqual(preset.colors["panel"], "#FFFFFF")
-        self.assertEqual(preset.colors["panel_alt"], "#FFF0F3")
+        self.assertEqual(preset.colors["window"], "#F0D6E0")
+        self.assertEqual(preset.colors["panel"], "#F4DCE5")
+        self.assertEqual(preset.colors["panel_alt"], "#E7C0CF")
         self.assertEqual(preset.colors["success_surface"], "#DCEFE2")
+
+    def test_light_presets_use_tinted_surfaces(self) -> None:
+        for name in ("Cherry Blossom", "Ember Study", "Parchment & Ink", "Arctic Glass", "Sage Paper"):
+            with self.subTest(name=name):
+                colors = THEME_PRESETS[name].colors
+                for key in ("window", "panel", "panel_alt", "panel_hover"):
+                    value = colors[key]
+                    self.assertNotEqual(value.casefold(), "#ffffff")
+                    channels = tuple(int(value[index : index + 2], 16) for index in (1, 3, 5))
+                    self.assertLess(max(channels), 250)
+
+    def test_parchment_ink_uses_warm_mahogany_accents(self) -> None:
+        preset = THEME_PRESETS["Parchment & Ink"]
+        self.assertEqual(preset.colors, PARCHMENT_INK_COLORS)
+        self.assertEqual(preset.colors["panel"], "#EED8BD")
+        self.assertEqual(preset.colors["accent"], "#7A3F4D")
+        self.assertEqual(preset.colors["accent_hover"], "#63303E")
 
     def test_resolve_theme_name_has_a_safe_fallback(self) -> None:
         self.assertEqual(resolve_theme_name("Cherry Blossom"), "Cherry Blossom")
