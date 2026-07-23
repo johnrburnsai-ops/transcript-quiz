@@ -577,6 +577,13 @@ class _SolidArrowComboBoxMixin:
     """Replace CustomTkinter's font/line arrow with one filled triangle."""
 
     def _draw(self, no_color_updates: bool = False) -> None:
+        # CustomTkinter reuses the ``dropdown_arrow`` tag and may try to
+        # configure its font before drawing. Remove our polygon first so the
+        # library always creates/configures its temporary native shape safely.
+        try:
+            self._canvas.delete("dropdown_arrow")
+        except (AttributeError, tk.TclError):
+            pass
         super()._draw(no_color_updates)
         try:
             self._canvas.delete("dropdown_arrow")
