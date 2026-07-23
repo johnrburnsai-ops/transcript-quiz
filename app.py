@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
 import queue
 import re
 import threading
 import time
+import tkinter as tk
 import webbrowser
+from collections import deque
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
 from tkinter import messagebox, simpledialog
 
@@ -22,45 +26,21 @@ from api_handler import (
 )
 from auth_manager import AuthManager, AuthStatus, DeviceChallenge
 from database import AttemptRecord, Database, QuizRecord, TranscriptRecord
+from theme import (
+    DEFAULT_THEME_NAME,
+    THEME_NAMES,
+    THEME_PRESETS,
+    resolve_theme_name,
+)
 
 
-ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 
-# A small, deliberate palette keeps the interface calm while giving actions and
-# states a clear visual language.  The old color names are retained because the
-# rest of the app uses them as semantic roles (rather than raw colors).
-COLORS = {
-    "window": "#080A0D",       # application background
-    "panel": "#11151A",        # primary surface
-    "panel_alt": "#191E25",    # elevated/input surface
-    "panel_hover": "#252D36",  # hover surface
-    "border": "#2A333D",
-    "border_strong": "#3D4956",
-    "text": "#F4F6F8",
-    "muted": "#9AA5B0",
-    "subtle": "#6F7B87",
-    "accent": "#2D6BFF",       # restrained electric blue
-    "accent_hover": "#3D73E8",
-    "accent_soft": "#142A52",
-    "on_accent": "#FFFFFF",
-    "focus": "#9AB7FF",
-    "teal": "#40C995",         # success
-    "green": "#40C995",        # success
-    "green_dark": "#12392C",   # success surface
-    "success_surface": "#12392C",
-    "success_surface_hover": "#194936",
-    "success_text": "#B6F0D1",
-    "success_border": "#40C995",
-    "red": "#F0717B",          # error
-    "red_dark": "#42232B",     # error surface
-    "danger_text": "#FFD9DE",
-    "amber": "#D8AB55",        # warning
-    "amber_dark": "#3D3018",
-    "warning_text": "#F3D58E",
-    "disabled_text": "#74808C",
-}
+# The selected preset is loaded before the widgets are built.  Selecting a
+# preset later updates this semantic map and recolors only the root widget
+# tree; child Toplevels keep their existing colors until they are reopened.
+COLORS = dict(THEME_PRESETS[DEFAULT_THEME_NAME].colors)
 
 FONT_DISPLAY = "Bahnschrift"
 FONT_BODY = "Segoe UI"
@@ -71,7 +51,567 @@ def _font(size: int, weight: str = "normal", family: str = FONT_BODY) -> ctk.CTk
     return ctk.CTkFont(family=family, size=size, weight=weight)
 
 
-class _QuestionCountComboBox(ctk.CTkComboBox):
+_THEME_WIDGET_COLOR_OPTIONS = (
+    "bg_color",
+    "fg_color",
+    "hover_color",
+    "border_color",
+    "text_color",
+    "text_color_disabled",
+    "button_color",
+    "button_hover_color",
+    "progress_color",
+    "scrollbar_fg_color",
+    "scrollbar_button_color",
+    "scrollbar_button_hover_color",
+    "dropdown_fg_color",
+    "dropdown_hover_color",
+    "dropdown_text_color",
+    "label_fg_color",
+    "label_text_color",
+)
+
+_THEME_DEFAULT_COLOR_BY_OPTION = {
+    "bg_color": "panel",
+    "fg_color": "panel",
+    "hover_color": "panel_hover",
+    "border_color": "border",
+    "text_color": "text",
+    "text_color_disabled": "disabled_text",
+    "button_color": "accent",
+    "button_hover_color": "accent_hover",
+    "progress_color": "accent",
+    "scrollbar_fg_color": "panel_alt",
+    "scrollbar_button_color": "border_strong",
+    "scrollbar_button_hover_color": "panel_hover",
+    "dropdown_fg_color": "panel_alt",
+    "dropdown_hover_color": "panel_hover",
+    "dropdown_text_color": "text",
+    "label_fg_color": "panel",
+    "label_text_color": "text",
+}
+
+_BUTTON_COLOR_OPTIONS = (
+    "fg_color",
+    "hover_color",
+    "border_color",
+    "text_color",
+    "text_color_disabled",
+)
+
+_BUTTON_DEFAULT_COLOR_BY_OPTION = {
+    "fg_color": "panel_alt",
+    "hover_color": "panel_hover",
+    "border_color": "border",
+    "text_color": "text",
+    "text_color_disabled": "disabled_text",
+}
+
+_THEME_INTERNAL_WIDGET_ATTRIBUTES = (
+    "_canvas",
+    "_parent_frame",
+    "_parent_canvas",
+    "_scrollbar",
+    "_label",
+    "_entry",
+    "_textbox",
+    "_dropdown_menu",
+)
+
+_NATIVE_COLOR_DEFAULTS = {
+    "bg": "window",
+    "background": "window",
+    "fg": "text",
+    "foreground": "text",
+    "activebackground": "panel_hover",
+    "activeforeground": "text",
+    "disabledbackground": "panel_alt",
+    "disabledforeground": "disabled_text",
+    "selectbackground": "accent",
+    "selectforeground": "on_accent",
+    "insertbackground": "text",
+    "highlightbackground": "border",
+    "highlightcolor": "focus",
+    "troughcolor": "panel_alt",
+    "readonlybackground": "panel_alt",
+}
+
+_NATIVE_THEME_OPTION_BY_OPTION = {
+    "fg": "text_color",
+    "foreground": "text_color",
+    "activebackground": "hover_color",
+    "activeforeground": "text_color",
+    "disabledbackground": "fg_color",
+    "disabledforeground": "text_color_disabled",
+    "selectbackground": "button_color",
+    "selectforeground": "text_color",
+    "insertbackground": "text_color",
+    "highlightbackground": "border_color",
+    "highlightcolor": "border_color",
+    "troughcolor": "fg_color",
+}
+
+_THEME_ROLE_PRIORITY_BY_OPTION = {
+    "bg_color": ("window", "panel", "panel_alt", "panel_hover"),
+    "fg_color": (
+        "window",
+        "panel",
+        "panel_alt",
+        "panel_hover",
+        "accent_soft",
+        "success_surface",
+        "red_dark",
+        "amber_dark",
+        "green_dark",
+        "accent",
+    ),
+    "hover_color": (
+        "panel_hover",
+        "accent_hover",
+        "success_surface_hover",
+        "red",
+    ),
+    "border_color": (
+        "border",
+        "border_strong",
+        "focus",
+        "success_border",
+        "red",
+    ),
+    "text_color": (
+        "text",
+        "on_accent",
+        "muted",
+        "subtle",
+        "success_text",
+        "danger_text",
+        "warning_text",
+    ),
+    "text_color_disabled": ("disabled_text",),
+    "button_color": ("accent", "panel_alt", "border_strong"),
+    "button_hover_color": ("accent_hover", "panel_hover", "border_strong"),
+    "progress_color": ("accent", "success_border"),
+    "scrollbar_fg_color": ("panel_alt", "panel", "window"),
+    "scrollbar_button_color": ("border_strong", "accent", "success_border"),
+    "scrollbar_button_hover_color": ("panel_hover", "accent_hover"),
+    "dropdown_fg_color": ("panel_alt", "panel", "window"),
+    "dropdown_hover_color": ("panel_hover", "accent_soft"),
+    "dropdown_text_color": ("text", "on_accent"),
+    "label_fg_color": ("panel", "panel_alt", "window"),
+    "label_text_color": ("text", "muted", "subtle"),
+}
+
+
+def _replace_theme_colors(
+    value: Any,
+    old_colors: dict[str, str],
+    new_colors: dict[str, str],
+) -> Any:
+    """Replace old semantic colors while preserving Tk's value shapes."""
+
+    old_to_new = {
+        old_value.casefold(): new_colors[key]
+        for key, old_value in old_colors.items()
+        if key in new_colors
+    }
+    if isinstance(value, str):
+        return old_to_new.get(value.casefold(), value)
+    if isinstance(value, tuple):
+        return tuple(_replace_theme_colors(item, old_colors, new_colors) for item in value)
+    if isinstance(value, list):
+        return [_replace_theme_colors(item, old_colors, new_colors) for item in value]
+    return value
+
+
+def _theme_color_for_widget_option(
+    option: str,
+    value: Any,
+    old_colors: dict[str, str],
+    new_colors: dict[str, str],
+) -> Any:
+    """Resolve explicit colors and replace CustomTkinter's mode tuples safely."""
+
+    if isinstance(value, str):
+        value_folded = value.casefold()
+        for key in _THEME_ROLE_PRIORITY_BY_OPTION.get(option, ()):
+            old_value = old_colors.get(key)
+            if old_value is not None and old_value.casefold() == value_folded:
+                return new_colors[key]
+    replacement = _replace_theme_colors(value, old_colors, new_colors)
+    if isinstance(value, tuple) and option in _THEME_DEFAULT_COLOR_BY_OPTION:
+        return new_colors[_THEME_DEFAULT_COLOR_BY_OPTION[option]]
+    return replacement
+
+
+def _known_theme_color(
+    value: Any,
+    old_colors: dict[str, str],
+    new_colors: dict[str, str],
+) -> str | None:
+    if isinstance(value, str):
+        new_values = {color.casefold(): color for color in new_colors.values()}
+        if value.casefold() in new_values:
+            return new_values[value.casefold()]
+    replacement = _replace_theme_colors(value, old_colors, new_colors)
+    if not isinstance(replacement, str) or replacement.casefold() == "transparent":
+        return None
+    if replacement.casefold() in {color.casefold() for color in new_colors.values()}:
+        return replacement
+    return None
+
+
+def _widget_background_color(
+    widget: Any,
+    old_colors: dict[str, str],
+    new_colors: dict[str, str],
+    seen: set[int] | None = None,
+) -> str:
+    """Find a stable semantic surface for a native child widget."""
+
+    if seen is None:
+        seen = set()
+    if id(widget) in seen:
+        return new_colors["window"]
+    seen.add(id(widget))
+
+    master = getattr(widget, "master", None)
+    if master is not None:
+        for option in ("fg_color", "bg_color", "bg", "background"):
+            try:
+                color = _theme_color_for_widget_option(
+                    option if option in {"fg_color", "bg_color"} else "bg_color",
+                    master.cget(option),
+                    old_colors,
+                    new_colors,
+                )
+            except (AttributeError, tk.TclError, TypeError, ValueError):
+                continue
+            if isinstance(color, str) and color.casefold() != "transparent":
+                if color.casefold() in {value.casefold() for value in new_colors.values()}:
+                    return color
+
+    for option in ("bg", "background", "bg_color", "fg_color"):
+        try:
+            color = _theme_color_for_widget_option(
+                option if option in {"fg_color", "bg_color"} else "bg_color",
+                widget.cget(option),
+                old_colors,
+                new_colors,
+            )
+        except (AttributeError, tk.TclError, TypeError, ValueError):
+            continue
+        if isinstance(color, str) and color.casefold() != "transparent":
+            if color.casefold() in {value.casefold() for value in new_colors.values()}:
+                return color
+
+    if master is not None:
+        return _widget_background_color(master, old_colors, new_colors, seen)
+    return new_colors["window"]
+
+
+def _recolor_native_widget(
+    widget: Any,
+    old_colors: dict[str, str],
+    new_colors: dict[str, str],
+) -> None:
+    """Recolor native Tk children embedded inside CustomTkinter widgets."""
+
+    if isinstance(widget, (tk.Toplevel, tk.Menu)) or hasattr(widget, "_set_appearance_mode"):
+        return
+    if not isinstance(widget, (tk.Canvas, tk.Frame, tk.Entry, tk.Text, tk.Listbox, tk.Scrollbar, tk.Label)):
+        return
+
+    background = _widget_background_color(widget, old_colors, new_colors)
+    for option, fallback_key in _NATIVE_COLOR_DEFAULTS.items():
+        try:
+            current = widget.cget(option)
+        except (AttributeError, tk.TclError, TypeError, ValueError):
+            continue
+        if option in {"bg", "background", "readonlybackground"}:
+            replacement = background
+        else:
+            replacement = _theme_color_for_widget_option(
+                _NATIVE_THEME_OPTION_BY_OPTION[option],
+                current,
+                old_colors,
+                new_colors,
+            )
+            if (
+                not isinstance(replacement, str)
+                or replacement.casefold() == "transparent"
+                or replacement.casefold() not in {value.casefold() for value in new_colors.values()}
+            ):
+                replacement = new_colors[fallback_key]
+        if replacement == current:
+            continue
+        try:
+            widget.configure(**{option: replacement})
+        except (AttributeError, tk.TclError, TypeError, ValueError):
+            continue
+
+
+def _theme_children(widget: Any) -> list[Any]:
+    children: list[Any] = []
+    seen: set[int] = set()
+    try:
+        children.extend(widget.winfo_children())
+    except (AttributeError, tk.TclError):
+        pass
+    for attribute in _THEME_INTERNAL_WIDGET_ATTRIBUTES:
+        try:
+            child = getattr(widget, attribute, None)
+        except BaseException:
+            child = None
+        if isinstance(child, tk.Misc):
+            children.append(child)
+
+    unique_children: list[Any] = []
+    for child in children:
+        if id(child) not in seen:
+            seen.add(id(child))
+            unique_children.append(child)
+    return unique_children
+
+
+def _recolor_button(
+    widget: Any,
+    old_colors: dict[str, str],
+    new_colors: dict[str, str],
+) -> None:
+    """Force every CTkButton color role, while retaining its semantic role."""
+
+    if not isinstance(widget, ctk.CTkButton):
+        return
+    updates: dict[str, Any] = {}
+    for option in _BUTTON_COLOR_OPTIONS:
+        try:
+            current = widget.cget(option)
+        except (AttributeError, tk.TclError, TypeError, ValueError):
+            continue
+        replacement = _theme_color_for_widget_option(option, current, old_colors, new_colors)
+        preserve_transparent = option in {"fg_color", "hover_color"} and current == "transparent"
+        if replacement == current and not preserve_transparent:
+            replacement = new_colors[_BUTTON_DEFAULT_COLOR_BY_OPTION[option]]
+        if replacement != current:
+            updates[option] = replacement
+
+    if updates:
+        try:
+            widget.configure(**updates)
+        except (AttributeError, tk.TclError, TypeError, ValueError):
+            for option, value in updates.items():
+                try:
+                    widget.configure(**{option: value})
+                except (AttributeError, tk.TclError, TypeError, ValueError):
+                    continue
+    try:
+        widget._draw()
+    except (AttributeError, tk.TclError, TypeError, ValueError):
+        pass
+
+
+def _recolor_scrollable_frame(
+    scrollable: Any,
+    old_colors: dict[str, str],
+    new_colors: dict[str, str],
+) -> None:
+    """Update CTkScrollableFrame's hidden parent, canvas, content, and bar."""
+
+    try:
+        current_surface = scrollable.cget("fg_color")
+    except (AttributeError, tk.TclError, TypeError, ValueError):
+        current_surface = "transparent"
+    surface_candidate = _theme_color_for_widget_option(
+        "fg_color",
+        current_surface,
+        old_colors,
+        new_colors,
+    )
+    surface = (
+        surface_candidate
+        if isinstance(surface_candidate, str)
+        and surface_candidate.casefold() != "transparent"
+        and surface_candidate.casefold() in {value.casefold() for value in new_colors.values()}
+        else new_colors["panel"]
+    )
+    try:
+        scrollable.configure(
+            fg_color=surface,
+            scrollbar_fg_color=new_colors["panel_alt"],
+            scrollbar_button_color=new_colors["border_strong"],
+            scrollbar_button_hover_color=new_colors["panel_hover"],
+            label_fg_color=surface,
+            label_text_color=new_colors["text"],
+        )
+    except (AttributeError, tk.TclError, TypeError, ValueError):
+        pass
+
+    parent_frame = getattr(scrollable, "_parent_frame", None)
+    parent_canvas = getattr(scrollable, "_parent_canvas", None)
+    scrollbar = getattr(scrollable, "_scrollbar", None)
+    label = getattr(scrollable, "_label", None)
+    for native in (scrollable, parent_canvas):
+        if isinstance(native, (tk.Canvas, tk.Frame)):
+            try:
+                if native is scrollable:
+                    tk.Frame.configure(native, bg=surface)
+                else:
+                    native.configure(bg=surface)
+            except (AttributeError, tk.TclError, TypeError, ValueError):
+                pass
+    if parent_frame is not None:
+        try:
+            parent_frame.configure(bg_color=surface)
+        except (AttributeError, tk.TclError, TypeError, ValueError):
+            pass
+    if scrollbar is not None:
+        try:
+            scrollbar.configure(
+                fg_color=new_colors["panel_alt"],
+                button_color=new_colors["border_strong"],
+                button_hover_color=new_colors["panel_hover"],
+            )
+        except (AttributeError, tk.TclError, TypeError, ValueError):
+            pass
+    if label is not None:
+        try:
+            label.configure(fg_color=surface, text_color=new_colors["text"])
+        except (AttributeError, tk.TclError, TypeError, ValueError):
+            pass
+
+
+def _recolor_root_widget_tree(
+    root: Any,
+    old_colors: dict[str, str],
+    new_colors: dict[str, str],
+    *,
+    max_widgets: int = 20000,
+    max_depth: int = 64,
+) -> None:
+    """Safely recolor the bounded main-window tree without touching Toplevels."""
+
+    pending: deque[tuple[Any, int]] = deque([(root, 0)])
+    seen: set[int] = set()
+    visited = 0
+    while pending and visited < max_widgets:
+        widget, depth = pending.popleft()
+        if widget is not root and isinstance(widget, tk.Toplevel):
+            continue
+        identity = id(widget)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        visited += 1
+
+        _recolor_button(widget, old_colors, new_colors)
+        if not isinstance(widget, ctk.CTkButton):
+            for option in _THEME_WIDGET_COLOR_OPTIONS:
+                try:
+                    current = widget.cget(option)
+                    replacement = _theme_color_for_widget_option(
+                        option,
+                        current,
+                        old_colors,
+                        new_colors,
+                    )
+                    if replacement != current:
+                        widget.configure(**{option: replacement})
+                except (AttributeError, tk.TclError, TypeError, ValueError):
+                    continue
+        _recolor_native_widget(widget, old_colors, new_colors)
+
+        if depth >= max_depth:
+            continue
+        try:
+            pending.extend((child, depth + 1) for child in _theme_children(widget))
+        except (AttributeError, tk.TclError):
+            continue
+
+    # Keep the three main lists deterministic even if a large list reaches the
+    # traversal bound before all of its private scrollable children do.
+    for name in ("transcript_list", "quiz_list", "attempt_list"):
+        scrollable = getattr(root, name, None)
+        if scrollable is None:
+            continue
+        _recolor_scrollable_frame(scrollable, old_colors, new_colors)
+
+
+_THEME_SETTINGS_FILENAME = "ui_preset.txt"
+
+
+def _theme_settings_path() -> Path | None:
+    """Return the small per-user preset file location, if it is usable."""
+
+    try:
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            return Path(local_app_data) / "TranscriptQuiz" / _THEME_SETTINGS_FILENAME
+        return Path.home() / ".transcript-quiz" / _THEME_SETTINGS_FILENAME
+    except (OSError, RuntimeError, TypeError):
+        return None
+
+
+def _load_saved_theme_name() -> str:
+    path = _theme_settings_path()
+    if path is None:
+        return DEFAULT_THEME_NAME
+    try:
+        return resolve_theme_name(path.read_text(encoding="utf-8").strip())
+    except (OSError, UnicodeError):
+        return DEFAULT_THEME_NAME
+
+
+def _save_theme_name(theme_name: str) -> bool:
+    path = _theme_settings_path()
+    if path is None:
+        return False
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{theme_name}\n", encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    return True
+
+
+class _SolidArrowComboBoxMixin:
+    """Replace CustomTkinter's font/line arrow with one filled triangle."""
+
+    def _draw(self, no_color_updates: bool = False) -> None:
+        super()._draw(no_color_updates)
+        try:
+            self._canvas.delete("dropdown_arrow")
+            width = self._apply_widget_scaling(self._current_width)
+            height = self._apply_widget_scaling(self._current_height)
+            arrow_width = max(5, height / 5)
+            arrow_height = max(4, height / 7)
+            center_x = width - height / 2
+            center_y = height / 2
+            color = (
+                self._text_color_disabled
+                if self._state == tk.DISABLED
+                else self._text_color
+            )
+            self._canvas.create_polygon(
+                center_x - arrow_width,
+                center_y - arrow_height / 2,
+                center_x + arrow_width,
+                center_y - arrow_height / 2,
+                center_x,
+                center_y + arrow_height / 2,
+                fill=self._apply_appearance_mode(color),
+                outline="",
+                tags=("dropdown_arrow",),
+            )
+            self._canvas.tag_raise("dropdown_arrow")
+        except (AttributeError, tk.TclError, TypeError, ValueError):
+            pass
+
+
+class _SolidArrowComboBox(_SolidArrowComboBoxMixin, ctk.CTkComboBox):
+    pass
+
+
+class _QuestionCountComboBox(_SolidArrowComboBox):
     """Keep the native dropdown on-screen when the control is near the bottom."""
 
     def _open_dropdown_menu(self) -> None:
@@ -398,7 +938,14 @@ class ReviewWindow(ctk.CTkToplevel):
             corner_radius=8,
         ).pack(side="right", padx=26, pady=16)
 
-        body = ctk.CTkScrollableFrame(self, fg_color=COLORS["window"], corner_radius=0)
+        body = ctk.CTkScrollableFrame(
+            self,
+            fg_color=COLORS["window"],
+            scrollbar_fg_color=COLORS["panel_alt"],
+            scrollbar_button_color=COLORS["border_strong"],
+            scrollbar_button_hover_color=COLORS["panel_hover"],
+            corner_radius=0,
+        )
         body.pack(fill="both", expand=True, padx=18, pady=18)
         body.grid_columnconfigure(0, weight=1)
 
@@ -653,6 +1200,8 @@ class QuizWindow(ctk.CTkToplevel):
                 height=32,
                 corner_radius=8,
                 font=_font(11, "bold", FONT_MONO),
+                fg_color=COLORS["panel_alt"],
+                hover_color=COLORS["panel_hover"],
                 border_width=1,
                 border_color=COLORS["border"],
                 text_color=COLORS["text"],
@@ -697,6 +1246,8 @@ class QuizWindow(ctk.CTkToplevel):
                 border_spacing=16,
                 font=_font(14),
                 corner_radius=10,
+                fg_color=COLORS["panel_alt"],
+                hover_color=COLORS["panel_hover"],
                 border_width=1,
                 text_color=COLORS["text"],
                 text_color_disabled=COLORS["disabled_text"],
@@ -977,6 +1528,13 @@ class QuizWindow(ctk.CTkToplevel):
 
 class QuizApp(ctk.CTk):
     def __init__(self, db: Database | None = None, api: ApiHandler | None = None) -> None:
+        theme_name = _load_saved_theme_name()
+        preset = THEME_PRESETS[theme_name]
+        COLORS.clear()
+        COLORS.update(preset.colors)
+        # Set the initial mode once before building the widget tree.  Later
+        # selection changes perform one guarded mode update when required.
+        ctk.set_appearance_mode(preset.appearance_mode)
         super().__init__()
         self._db_error: BaseException | None = None
         try:
@@ -986,6 +1544,8 @@ class QuizApp(ctk.CTk):
             self._db_error = exc
         self.api = api or ApiHandler()
         self.auth = AuthManager(self.api)
+
+        self._theme_name = theme_name
 
         self.title("Transcript Quiz")
         self.geometry("1440x900")
@@ -1054,6 +1614,51 @@ class QuizApp(ctk.CTk):
         self.after(120, self._start_backend)
         self._startup_check_after = self.after(300, self._startup_state_check)
 
+    def _select_theme(self, theme_name: str) -> None:
+        if self._closing or self._destroyed:
+            return
+        selected_name = resolve_theme_name(theme_name, self._theme_name)
+        if selected_name != theme_name:
+            self._set_status("That visual preset is unavailable.", "warning")
+            return
+        if selected_name == self._theme_name:
+            self._set_status(f"{selected_name} is already active.", "info")
+            return
+
+        old_colors = dict(COLORS)
+        new_colors = dict(THEME_PRESETS[selected_name].colors)
+        COLORS.clear()
+        COLORS.update(new_colors)
+        self._theme_name = selected_name
+
+        try:
+            self.configure(
+                fg_color=new_colors["window"],
+                bg_color=new_colors["window"],
+            )
+        except (AttributeError, tk.TclError, TypeError, ValueError):
+            pass
+
+        try:
+            if ctk.get_appearance_mode().casefold() != THEME_PRESETS[selected_name].appearance_mode.casefold():
+                ctk.set_appearance_mode(THEME_PRESETS[selected_name].appearance_mode)
+        except (AttributeError, tk.TclError):
+            pass
+
+        _recolor_root_widget_tree(self, old_colors, new_colors)
+        try:
+            self.theme_selector.set(selected_name)
+        except (AttributeError, tk.TclError):
+            pass
+
+        if _save_theme_name(selected_name):
+            self._set_status(f"Preset changed to {selected_name}.", "success")
+        else:
+            self._set_status(
+                f"Preset changed to {selected_name}, but it could not be saved for the next launch.",
+                "warning",
+            )
+
     def _build_header(self) -> None:
         header = ctk.CTkFrame(
             self,
@@ -1101,7 +1706,7 @@ class QuizApp(ctk.CTk):
             font=_font(10, "bold"),
             text_color=COLORS["muted"],
         ).pack(anchor="w", pady=(0, 3))
-        self.model_selector = ctk.CTkComboBox(
+        self.model_selector = _SolidArrowComboBox(
             model_group,
             width=300,
             height=36,
@@ -1117,6 +1722,32 @@ class QuizApp(ctk.CTk):
             command=self._model_selection_changed,
         )
         self.model_selector.pack(anchor="w")
+
+        theme_group = ctk.CTkFrame(header, fg_color="transparent")
+        theme_group.pack(side="left", padx=(6, 10), pady=10)
+        ctk.CTkLabel(
+            theme_group,
+            text="Preset",
+            font=_font(10, "bold"),
+            text_color=COLORS["muted"],
+        ).pack(anchor="w", pady=(0, 3))
+        self.theme_selector = _SolidArrowComboBox(
+            theme_group,
+            width=190,
+            height=36,
+            values=list(THEME_NAMES),
+            state="readonly",
+            fg_color=COLORS["panel_alt"],
+            border_color=COLORS["border"],
+            button_color=COLORS["accent"],
+            button_hover_color=COLORS["accent_hover"],
+            text_color=COLORS["text"],
+            corner_radius=9,
+            font=_font(11),
+            command=self._select_theme,
+        )
+        self.theme_selector.pack(anchor="w")
+        self.theme_selector.set(self._theme_name)
 
         auth_group = ctk.CTkFrame(header, fg_color="transparent")
         auth_group.pack(side="right", padx=24, pady=14)
@@ -1386,7 +2017,10 @@ class QuizApp(ctk.CTk):
         self.search_count_label.grid(row=2, column=0, sticky="w", padx=18, pady=(0, 5))
         self.transcript_list = ctk.CTkScrollableFrame(
             self.left_panel,
-            fg_color="transparent",
+            fg_color=COLORS["panel"],
+            scrollbar_fg_color=COLORS["panel_alt"],
+            scrollbar_button_color=COLORS["border_strong"],
+            scrollbar_button_hover_color=COLORS["panel_hover"],
             corner_radius=0,
         )
         self.transcript_list.grid(row=3, column=0, sticky="nsew", padx=8, pady=(0, 12))
@@ -1563,7 +2197,10 @@ class QuizApp(ctk.CTk):
         ).grid(row=7, column=0, sticky="w", padx=18, pady=(10, 4))
         self.quiz_list = ctk.CTkScrollableFrame(
             self.middle_panel,
-            fg_color="transparent",
+            fg_color=COLORS["panel"],
+            scrollbar_fg_color=COLORS["panel_alt"],
+            scrollbar_button_color=COLORS["border_strong"],
+            scrollbar_button_hover_color=COLORS["panel_hover"],
             corner_radius=0,
         )
         self.quiz_list.grid(row=8, column=0, sticky="nsew", padx=10, pady=(0, 12))
@@ -1630,7 +2267,10 @@ class QuizApp(ctk.CTk):
         self.attempt_summary.grid(row=6, column=0, sticky="w", padx=18, pady=(2, 6))
         self.attempt_list = ctk.CTkScrollableFrame(
             self.right_panel,
-            fg_color="transparent",
+            fg_color=COLORS["panel"],
+            scrollbar_fg_color=COLORS["panel_alt"],
+            scrollbar_button_color=COLORS["border_strong"],
+            scrollbar_button_hover_color=COLORS["panel_hover"],
             corner_radius=0,
         )
         self.attempt_list.grid(row=7, column=0, sticky="nsew", padx=10, pady=(0, 12))

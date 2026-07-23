@@ -86,9 +86,10 @@ The isolated application profile does not import credentials from your normal `~
 
 1. Select **New**, enter a name, and paste a transcript.
 2. Save the transcript.
-3. Choose a question count and select **Generate quiz**. Generation runs in the background and can be cancelled.
-4. Select a generated quiz and choose **Take quiz**.
-5. Answer all questions, submit, and review the result. Selecting an answer advances automatically, while the number grid and **Previous** button let you revisit questions.
+3. Use the **Preset** selector beside **Model** in the header to choose **Electric Blue** (the focused dark default), **Cherry Blossom** (a white, light-pink, and light-green palette), or one of the additional palettes: **Tidal Teal**, **Aurora Violet**, **Moss Terminal**, **Ember Study**, **Oxblood Ledger**, **Parchment & Ink**, **Arctic Glass**, **Midnight Orchid**, **Copper Circuit**, and **Sage Paper**. The current main window updates immediately; the choice is also saved for the next launch when possible.
+4. Choose a question count and select **Generate quiz**. Generation runs in the background and can be cancelled.
+5. Select a generated quiz and choose **Take quiz**.
+6. Answer all questions, submit, and review the result. Selecting an answer advances automatically, while the number grid and **Previous** button let you revisit questions.
 
 Saved transcripts are grouped by date and searchable. Each transcript can have multiple quizzes; quizzes can be renamed or deleted, and each quiz keeps its attempt history, scores, answers, and elapsed time. Deleting a quiz also deletes its saved attempts.
 
